@@ -28,8 +28,8 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,26,10,0
- PRODUCTVERSION 1,26,10,0
+ FILEVERSION 1,0,0,0
+ PRODUCTVERSION 1,0,0,0
  FILEFLAGSMASK 0x17L
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -44,13 +44,14 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "IDRIX"
-            VALUE "FileDescription", "VeraCrypt Format"
-            VALUE "FileVersion", "1.26.10"
-            VALUE "LegalTrademarks", "VeraCrypt"
-            VALUE "OriginalFilename", "VeraCrypt Format.exe"
-            VALUE "ProductName", "VeraCrypt"
-            VALUE "ProductVersion", "1.26.10"
+            VALUE "CompanyName", "Somansa"
+            VALUE "FileDescription", "PvsuCrypt Format"
+            VALUE "FileVersion", "1.0.0.0"
+            VALUE "LegalCopyright", "Copyright(c) 2024 Somansa Co., Ltd. All rights reserved."
+            VALUE "LegalTrademarks", "PvsuCrypt"
+            VALUE "OriginalFilename", "PvsuCryptFormat.dll"
+            VALUE "ProductName", "PvsuCrypt"
+            VALUE "ProductVersion", "1.0.0.0"
         END
     END
     BLOCK "VarFileInfo"
@@ -81,8 +82,8 @@ IDR_FORMAT_TLB          TYPELIB                 "Format.tlb"
 
 IDD_VOL_CREATION_WIZARD_DLG DIALOGEX 0, 0, 450, 250
 STYLE DS_SETFONT | DS_SETFOREGROUND | DS_FIXEDSYS | DS_CENTER | WS_MINIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "VeraCrypt Volume Creation Wizard"
-CLASS "VeraCryptCustomDlg"
+CAPTION "PvsuCrypt Volume Creation Wizard"
+CLASS "PvsuCryptCustomDlg"
 FONT 8, "MS Shell Dlg", 0, 0, 0x0
 BEGIN
     PUSHBUTTON      "&Help",IDHELP,166,234,60,14

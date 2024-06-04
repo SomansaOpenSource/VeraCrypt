@@ -277,6 +277,10 @@ typedef struct CRYPTO_INFO_t
 
 	uint32 SectorSize;
 
+	// debug - tariq
+	//uint64 ExpirationDate;					// SYSTEMTIME
+	UINT64_STRUCT ExpirationDate;				// SYSTEMTIME
+
 #endif // !TC_WINDOWS_BOOT
 
 	UINT64_STRUCT VolumeSize;

@@ -741,7 +741,8 @@ static NTSTATUS SaveDriveVolumeHeader (DriveFilterExtension *Extension)
 
 		DecryptBuffer (header + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, pCryptoInfo);
 
-		if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)
+		/*if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)*/
+		if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x50565355)
 		{
 			Dump ("Header not decrypted");
 			status = STATUS_UNKNOWN_REVISION;

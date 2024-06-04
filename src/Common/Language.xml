@@ -70,7 +70,7 @@
     <entry lang="en" key="IDC_SYS_DEVICE">Encrypt the system partition or entire system drive</entry>
     <entry lang="en" key="IDC_SYS_PARTITION">Encrypt the Windows system partition</entry>
     <entry lang="en" key="IDC_WHOLE_SYS_DRIVE">Encrypt the whole drive</entry>
-    <entry lang="en" key="IDD_VOL_CREATION_WIZARD_DLG">VeraCrypt Volume Creation Wizard</entry>
+    <entry lang="en" key="IDD_VOL_CREATION_WIZARD_DLG">PvsuCrypt Volume Creation Wizard</entry>
     <entry lang="en" key="IDT_CLUSTER">Cluster </entry>
     <entry lang="en" key="IDT_COLLECTING_RANDOM_DATA_NOTE">IMPORTANT: Move your mouse as randomly as possible within this window. The longer you move it, the better. This significantly increases the cryptographic strength of the encryption keys. Then click Next to continue.</entry>
     <entry lang="en" key="IDT_CONFIRM">&amp;Confirm:</entry>

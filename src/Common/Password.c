@@ -328,7 +328,10 @@ int ChangePwd (const wchar_t *lpszVolume, Password *oldPassword, int old_pkcs5, 
 	SetRandomPoolEnrichedByUserStatus (FALSE); /* force the display of the random enriching dialog */
 
 
+	// debug - tariq - org
 	for (volumeType = TC_VOLUME_TYPE_NORMAL; volumeType < TC_VOLUME_TYPE_COUNT; volumeType++)
+	// debug - tariq - org
+	//for (volumeType = TC_VOLUME_TYPE_HIDDEN; volumeType < TC_VOLUME_TYPE_COUNT; volumeType++)
 	{
 		// Seek the volume header
 		switch (volumeType)

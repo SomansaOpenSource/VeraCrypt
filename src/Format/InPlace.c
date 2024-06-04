@@ -1889,7 +1889,8 @@ int FastVolumeHeaderUpdate (HANDLE dev, CRYPTO_INFO *headerCryptoInfo, CRYPTO_IN
 
 	DecryptBuffer (header + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, pCryptoInfo);
 
-	if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)
+	/*if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)*/
+	if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x50565355)
 	{
 		nStatus = ERR_PARAMETER_INCORRECT;
 		goto closing_seq;

@@ -103,6 +103,10 @@ enum hidden_os_read_only_notif_mode
 #define TIMER_INTERVAL_UPDATE_DEVICE_LIST	1000
 #define TIMER_INTERVAL_CHECK_FOREGROUND		500
 
+// debug - tariq
+#define MAX_OUT_BUF    4096
+// debug - tariq
+
 BootEncryption			*BootEncObj = NULL;
 BootEncryptionStatus	BootEncStatus;
 BootEncryptionStatus	RecentBootEncStatus;
@@ -5348,9 +5352,73 @@ ret:
 	return status;
 }
 
+void AppDebugWriteViewInvalidParameterHandler(const wchar_t* expression,
+	const wchar_t* function,
+	const wchar_t* file,
+	unsigned int line,
+	uintptr_t pReserved)
+{
+	throw std::invalid_argument("Invalid parameter.");
+}
+
+void AppDebugWriteViewW(const WCHAR* pwzFmt, ...)
+{
+	int nMaxBuf = 0;
+	SYSTEMTIME  SysTime = { 0 };
+	DWORD       dwFileSize = 0;
+	wchar_t     wzBuffer[MAX_OUT_BUF] = { 0 };
+	wchar_t     wzPrtBuffer[MAX_OUT_BUF] = { 0 };
+
+	//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+	//RtlZeroMemory(&SysTime, sizeof(SysTime));
+
+	if(!pwzFmt) return;
+	
+	va_list	 ap;
+	_invalid_parameter_handler oldHandler, newHandler;
+	va_start( ap, pwzFmt );
+
+	//int nLength = _vsctprintf(pwzFmt, ap);
+	int nLength = _vscwprintf(pwzFmt, ap);
+	try {
+		newHandler = AppDebugWriteViewInvalidParameterHandler;
+		oldHandler = _set_invalid_parameter_handler(newHandler);
+
+		if (nLength + 1 < MAX_OUT_BUF) {
+			vswprintf_s(wzBuffer, nLength + 1, pwzFmt, ap);
+		}
+	}
+	catch (const std::invalid_argument& ia) {
+		_set_invalid_parameter_handler(oldHandler);
+		//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+		return;
+	}
+	_set_invalid_parameter_handler(oldHandler);
+	va_end(ap);
+	
+	nMaxBuf = (MAX_OUT_BUF - 128);
+	if(wcslen(wzBuffer) >= nMaxBuf)
+	{
+		OutputDebugStringW( wzBuffer );
+		return;
+	}
+
+	GetLocalTime( &SysTime );
+	StringCchPrintfW( wzPrtBuffer, MAX_OUT_BUF, 
+					  L"[%04d%02d%02d-%02d:%02d:%02d][pvsu] >> %s \n",  
+			         SysTime.wYear, SysTime.wMonth, SysTime.wDay, SysTime.wHour, SysTime.wMinute, SysTime.wSecond, wzBuffer );
+
+	OutputDebugStringW( wzPrtBuffer );
+}
 
 static BOOL Dismount (HWND hwndDlg, int nDosDriveNo)
 {
+	// debug - tariq
+	{
+		AppDebugWriteViewW(L"Dismount - begin, nDosDriveNo: [%d]", nDosDriveNo);
+	}
+	// debug - tariq
+
 	BOOL status = FALSE;
 	WaitCursor ();
 
@@ -5364,10 +5432,22 @@ static BOOL Dismount (HWND hwndDlg, int nDosDriveNo)
 		}
 	}
 
+	// debug - tariq
+	{
+		AppDebugWriteViewW(L"Dismount - bCloseDismountedWindows: [%d]", bCloseDismountedWindows);
+	}
+	// debug - tariq
+
 	if (bCloseDismountedWindows)
 	{
 		CloseVolumeExplorerWindows (hwndDlg, nDosDriveNo);
 	}
+
+	// debug - tariq
+	{
+		AppDebugWriteViewW(L"Dismount - UnmountVolume");
+	}
+	// debug - tariq
 
 	if (UnmountVolume (hwndDlg, nDosDriveNo, bForceUnmount))
 	{
@@ -5377,6 +5457,12 @@ static BOOL Dismount (HWND hwndDlg, int nDosDriveNo)
 			MessageBeep (0xFFFFFFFF);
 		RefreshMainDlg (hwndDlg);
 	}
+
+	// debug - tariq
+	{
+		AppDebugWriteViewW(L"Dismount - end");
+	}
+	// debug - tariq
 
 	NormalCursor ();
 	return status;
@@ -10063,6 +10149,11 @@ static BOOL StartSystemFavoritesService ()
 #ifndef VCEXPANDER
 int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, wchar_t *lpszCommandLine, int nCmdShow)
 {
+	// debug - tariq
+	{
+		::MessageBox(NULL,L"test",L"",MB_OK);
+	}
+
 	int argc;
 	LPWSTR *argv = CommandLineToArgvW (GetCommandLineW(), &argc);
 
@@ -10115,7 +10206,7 @@ int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, wchar_t *lpsz
 	RegisterRedTick(hInstance);
 
 	/* Allocate, dup, then store away the application title */
-	lpszTitle = L"VeraCrypt";
+	lpszTitle = L"PvsuCrypt";
 
 	status = DriverAttach ();
 	if (status != 0)
@@ -12580,4 +12671,410 @@ void HookMouseWheel (HWND hwndDlg, UINT ctrlId)
 
 	SetWindowLongPtrW (hwndCtrl, GWLP_USERDATA, (LONG_PTR) GetWindowLongPtrW (hwndCtrl, GWLP_WNDPROC));
 	SetWindowLongPtrW (hwndCtrl, GWLP_WNDPROC, (LONG_PTR) MouseWheelProc);
+}
+
+////////////////////////////////////////
+// interface
+//extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2)
+extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2, char* pszParam3, int nParam3Length)
+{
+	// debug - tariq
+	AppDebugWriteViewW(L"ConnectSecureDrive - begin");
+	// debug - tariq
+
+	//return theApp.ConnectSecureDrive(pszParam1, pszParam2);
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			return 0;
+		}
+	}
+
+	// mount drive
+	int exitCode = 0;
+	HWND hwndDlg = NULL;
+
+	Silent = 1;
+	//case CommandDismount:
+
+	// set drive letter to mount
+	//memcpy(szFileName, pszParam1, 2);
+	wchar_t szUsbDrive[3] = {0};
+	memcpy(szUsbDrive, pszParam1, 2);
+	memcpy(szDriveLetter, pszParam2, 2);
+	//= strDriveLetter + L":\\somansa\\disk\\C0000001";
+	std::wstring ImagePath(szUsbDrive);
+	ImagePath += L":\\somansa\\disk\\C0000001";
+	//ImagePath += L":\\testVera";
+	memcpy(szFileName, ImagePath.c_str(), ImagePath.length() * sizeof(wchar_t));
+	// debug - tariq
+	{
+		//CString msg;
+		//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+		AppDebugWriteViewW(L"ConnectSecureDrive - szUsbDrive: [%s], szDriveLetter: [%s], szFileName: [%s]", szUsbDrive, szDriveLetter, szFileName);
+	}
+	// debug - tariq
+	// temp
+	//int iLen = WideCharToMultiByte (CP_UTF8, 0, CmdRawPassword, -1, (char*) CmdVolumePassword.Text, MAX_PASSWORD + 1, NULL, NULL);
+	//if (iLen > 0)
+	//{
+	//	CmdVolumePassword.Length = (unsigned __int32) (iLen - 1);
+	//	CmdVolumePasswordValid = TRUE;
+	//}
+	//else
+	//{
+	//	burn (CmdRawPassword, sizeof (CmdRawPassword));
+	//	AbortProcess ("COMMAND_LINE_ERROR");
+	//}
+	//memcpy(CmdVolumePassword.Text, "test", 5);
+	//CmdVolumePassword.Length = 4;
+	// debug - tariq - test
+	//memcpy(CmdVolumePassword.Text, "sms980502!", 11);
+	//CmdVolumePassword.Length = 10;
+	memcpy(CmdVolumePassword.Text, pszParam3, nParam3Length);
+	CmdVolumePassword.Length = nParam3Length;
+	// debug - tariq - test
+
+	if (szFileName[0] != 0 && !TranslateVolumeID (hwndDlg, szFileName, ARRAYSIZE (szFileName)))
+	{
+		exitCode = 1;
+	}
+	else if (szFileName[0] != 0 && !IsMountedVolume (szFileName))
+	{
+		BOOL mounted = FALSE;
+		int EffectiveVolumePkcs5 = CmdVolumePkcs5;
+		BOOL bEffectiveTryEmptyPasswordWhenKeyfileUsed = bCmdTryEmptyPasswordWhenKeyfileUsedValid? bCmdTryEmptyPasswordWhenKeyfileUsed : bTryEmptyPasswordWhenKeyfileUsed;
+
+		if (!VolumePathExists (szFileName))
+		{
+			handleWin32Error (hwndDlg, SRC_POS);
+		}
+		else
+		{
+			/* Priority is given to command line parameters
+				* Default values used only when nothing specified in command line
+				*/
+			if (EffectiveVolumePkcs5 == 0)
+				EffectiveVolumePkcs5 = DefaultVolumePkcs5;
+
+			// Command line password or keyfiles
+			if (CmdVolumePassword.Length != 0 || (FirstCmdKeyFile && (CmdVolumePasswordValid || bEffectiveTryEmptyPasswordWhenKeyfileUsed)))
+			{
+				BOOL reportBadPasswd = CmdVolumePassword.Length > 0;
+
+				//if (FirstCmdKeyFile)
+				//	KeyFilesApply (hwndDlg, &CmdVolumePassword, FirstCmdKeyFile, szFileName);
+
+				mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A',
+					szFileName, &CmdVolumePassword, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount,
+					&mountOptions, Silent, reportBadPasswd);
+
+				burn (&CmdVolumePassword, sizeof (CmdVolumePassword));
+			}
+			else
+			{
+				//// Cached password
+				//mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A', szFileName, NULL, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount, &mountOptions, Silent, FALSE);
+			}
+		}
+	}
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	// debug - tariq
+	AppDebugWriteViewW(L"ConnectSecureDrive - end");
+	// debug - tariq
+
+	//return 0;
+	return exitCode;
+}
+
+extern "C" _declspec(dllexport) int __cdecl DisconnectSecureDrive(wchar_t* pszParam)
+{
+	// debug - tariq
+	AppDebugWriteViewW(L"DisconnectSecureDrive - begin");
+	// debug - tariq
+
+	//return theApp.DisconnectSecureDrive(pszParam);
+
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			// debug - tariq
+			AppDebugWriteViewW(L"DisconnectSecureDrive - NODRIVER");
+			// debug - tariq
+
+			return 0;
+		}
+	}
+
+	// mount drive
+	cmdUnmountDrive = -1;
+	int exitCode = 0;
+	HWND hwndDlg = NULL;
+
+	Silent = 1;
+	//BOOL bForceUnmount = FALSE;			/* Unmount volume even if it cannot be locked */
+	bForceUnmount = TRUE;
+	//case CommandDismount:
+
+	// set drive letter to mount
+	memcpy(szDriveLetter, pszParam, 2);
+
+	// convert drive letter
+	//if (HAS_ARGUMENT == GetArgumentValue (lpszCommandLineArgs, &i, nNoCommandLineArgs,
+			//szDriveLetter, ARRAYSIZE (szDriveLetter)))
+	{
+		if (	(wcslen(szDriveLetter) == 1)
+			|| (wcslen(szDriveLetter) == 2 && szDriveLetter[1] == L':')
+			)
+		{
+			cmdUnmountDrive = towupper(szDriveLetter[0]) - L'A';
+			if ((cmdUnmountDrive < 0) || (cmdUnmountDrive > (L'Z' - L'A')))
+				//AbortProcess ("BAD_DRIVE_LETTER");
+				exitCode = 1;
+		}
+		else
+			//AbortProcess ("BAD_DRIVE_LETTER");
+			exitCode = 1;
+	}
+	//else
+	//	cmdUnmountDrive = -1;
+
+	// debug - tariq
+	{
+		//CString msg;
+		//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+		AppDebugWriteViewW(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d], bForceUnmount: [%d]", exitCode, cmdUnmountDrive, bForceUnmount);
+	}
+	// debug - tariq
+
+		//break;
+
+	// Dismount
+	if ((exitCode == 0) && (cmdUnmountDrive >= 0))
+	{
+		MOUNT_LIST_STRUCT mountList;
+		DWORD bytesReturned;
+
+		// debug - tariq
+		{
+			//CString msg;
+			//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+			AppDebugWriteViewW(L"DisconnectSecureDrive - DeviceIoControl: TC_IOCTL_GET_MOUNTED_VOLUMES - 1");
+		}
+		// debug - tariq
+		BOOL bRet = FALSE;
+		bRet = DeviceIoControl (hDriver, TC_IOCTL_GET_MOUNTED_VOLUMES, NULL, 0, &mountList, sizeof (mountList), &bytesReturned, NULL);
+		// debug - tariq
+		{
+			//CString msg;
+			//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+			AppDebugWriteViewW(L"DisconnectSecureDrive - DeviceIoControl: TC_IOCTL_GET_MOUNTED_VOLUMES, bRet: [%d], mountList.ulMountedDrives: [%d]", bRet, mountList.ulMountedDrives);
+		}
+		// debug - tariq
+
+		//if (DeviceIoControl (hDriver, TC_IOCTL_GET_MOUNTED_VOLUMES, NULL, 0, &mountList, sizeof (mountList), &bytesReturned, NULL)
+		if (bRet
+			&& ((mountList.ulMountedDrives < (1 << 26))
+			&& (mountList.ulMountedDrives & (1 << cmdUnmountDrive)) == 0)
+			)
+		{
+			//Error ("NO_VOLUME_MOUNTED_TO_DRIVE", hwndDlg);
+			exitCode = 1;
+		}
+		else if (!Dismount (hwndDlg, cmdUnmountDrive))
+			exitCode = 1;
+	}
+	//else if (cmdUnmountDrive == -1)
+	//{
+	//	if (!DismountAll (hwndDlg, bForceUnmount, !Silent, UNMOUNT_MAX_AUTO_RETRIES, UNMOUNT_AUTO_RETRY_DELAY))
+	//		exitCode = 1;
+	//}
+
+	// debug - tariq
+	{
+		//CString msg;
+		//msg.Format(L"DisconnectSecureDrive - exitCode: [%d]", exitCode);
+		AppDebugWriteViewW(L"DisconnectSecureDrive - exitCode: [%d]", exitCode);
+	}
+	// debug - tariq
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	// debug - tariq
+	AppDebugWriteViewW(L"DisconnectSecureDrive - end");
+	// debug - tariq
+
+	//return 0;
+	return exitCode;
+}
+
+extern "C" _declspec(dllexport) int __cdecl GetMountedSecureDrive (wchar_t* pszParam)
+{
+	// debug - tariq
+	AppDebugWriteViewW(L"GetMountedSecureDrive  - begin");
+	// debug - tariq
+
+	//return theApp.ConnectSecureDrive(pszParam1, pszParam2);
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			return 0;
+		}
+	}
+
+	// mount drive
+	int exitCode = -1;
+	//HWND hwndDlg = NULL;
+
+	Silent = 1;
+	//case CommandDismount:
+
+	// set drive letter to mount
+	//memcpy(szFileName, pszParam1, 2);
+	wchar_t szUsbDrive[3] = {0};
+	memcpy(szUsbDrive, pszParam, 2);
+	//memcpy(szDriveLetter, pszParam2, 2);
+	//= strDriveLetter + L":\\somansa\\disk\\C0000001";
+	std::wstring ImagePath(szUsbDrive);
+	ImagePath += L":\\somansa\\disk\\C0000001";
+	//ImagePath += L":\\testVera";
+	memcpy(szFileName, ImagePath.c_str(), ImagePath.length() * sizeof(wchar_t));
+	// debug - tariq
+	{
+		//CString msg;
+		//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+		AppDebugWriteViewW(L"GetMountedSecureDrive  - szUsbDrive: [%s], szFileName: [%s]", szUsbDrive, szFileName);
+	}
+	// debug - tariq
+	// temp
+	//int iLen = WideCharToMultiByte (CP_UTF8, 0, CmdRawPassword, -1, (char*) CmdVolumePassword.Text, MAX_PASSWORD + 1, NULL, NULL);
+	//if (iLen > 0)
+	//{
+	//	CmdVolumePassword.Length = (unsigned __int32) (iLen - 1);
+	//	CmdVolumePasswordValid = TRUE;
+	//}
+	//else
+	//{
+	//	burn (CmdRawPassword, sizeof (CmdRawPassword));
+	//	AbortProcess ("COMMAND_LINE_ERROR");
+	//}
+	//memcpy(CmdVolumePassword.Text, "test", 5);
+	//CmdVolumePassword.Length = 4;
+
+	//if (szFileName[0] != 0 && !TranslateVolumeID (hwndDlg, szFileName, ARRAYSIZE (szFileName)))
+	//{
+	//	exitCode = 1;
+	//	// debug - tariq
+	//	{
+	//		//CString msg;
+	//		//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+	//		AppDebugWriteViewW(L"GetMountedSecureDrive  - exitCode: [%d]", exitCode);
+	//	}
+	//	// debug - tariq
+	//}
+	//else if (szFileName[0] != 0 && !IsMountedVolume (szFileName))
+	{
+		int nMountedDriveNo = GetMountedVolumeDriveNo (szFileName);
+		exitCode = nMountedDriveNo;
+		// debug - tariq
+		{
+			//CString msg;
+			//msg.Format(L"DisconnectSecureDrive - exitCode: [%d], cmdUnmountDrive: [%d]", exitCode, cmdUnmountDrive);
+			AppDebugWriteViewW(L"GetMountedSecureDrive  - nMountedDriveNo: [%d]", nMountedDriveNo);
+		}
+		// debug - tariq
+
+		//BOOL mounted = FALSE;
+		//int EffectiveVolumePkcs5 = CmdVolumePkcs5;
+		//BOOL bEffectiveTryEmptyPasswordWhenKeyfileUsed = bCmdTryEmptyPasswordWhenKeyfileUsedValid? bCmdTryEmptyPasswordWhenKeyfileUsed : bTryEmptyPasswordWhenKeyfileUsed;
+
+		//if (!VolumePathExists (szFileName))
+		//{
+		//	handleWin32Error (hwndDlg, SRC_POS);
+		//}
+		//else
+		//{
+		//	/* Priority is given to command line parameters
+		//		* Default values used only when nothing specified in command line
+		//		*/
+		//	if (EffectiveVolumePkcs5 == 0)
+		//		EffectiveVolumePkcs5 = DefaultVolumePkcs5;
+
+		//	// Command line password or keyfiles
+		//	if (CmdVolumePassword.Length != 0 || (FirstCmdKeyFile && (CmdVolumePasswordValid || bEffectiveTryEmptyPasswordWhenKeyfileUsed)))
+		//	{
+		//		BOOL reportBadPasswd = CmdVolumePassword.Length > 0;
+
+		//		//if (FirstCmdKeyFile)
+		//		//	KeyFilesApply (hwndDlg, &CmdVolumePassword, FirstCmdKeyFile, szFileName);
+
+		//		mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A',
+		//			szFileName, &CmdVolumePassword, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount,
+		//			&mountOptions, Silent, reportBadPasswd);
+
+		//		burn (&CmdVolumePassword, sizeof (CmdVolumePassword));
+		//	}
+		//	else
+		//	{
+		//		//// Cached password
+		//		//mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A', szFileName, NULL, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount, &mountOptions, Silent, FALSE);
+		//	}
+		//}
+	}
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	// debug - tariq
+	AppDebugWriteViewW(L"GetMountedSecureDrive  - end");
+	// debug - tariq
+
+	//return 0;
+	return exitCode;
 }

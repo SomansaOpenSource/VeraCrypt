@@ -322,7 +322,7 @@ static unsigned char gpbSha512MSCodeSignCertFingerprint[64] = {
 #define WINDOWS_DIALOG_CLASS L"#32770"
 
 /* Custom class names */
-#define TC_DLG_CLASS L"VeraCryptCustomDlg"
+#define TC_DLG_CLASS L"PvsuCryptCustomDlg"
 #define TC_SPLASH_CLASS L"VeraCryptSplashDlg"
 
 /* constant used by ChangeWindowMessageFilter calls */
@@ -861,7 +861,9 @@ BOOL VerifyModuleSignature (const wchar_t* path)
 
     // we check our own authenticode signature only starting from Windows 10 since this is
 	// the minimal supported OS apart from XP where we can't verify SHA256 signatures
-	if (!IsOSAtLeast (WIN_10))
+	// debug - tariq
+	//if (!IsOSAtLeast (WIN_10))
+	// debug - tariq
 		return TRUE;
 
 	// Strip quotation marks (if any)
@@ -3556,6 +3558,7 @@ void DoPostInstallTasks (HWND hwndDlg)
 		SavePostInstallTasksSettings (TC_POST_INSTALL_CFG_REMOVE_ALL);
 }
 
+#ifndef MOUNT_DLL
 #ifndef SETUP_DLL
 // Use an idea proposed in https://medium.com/@1ndahous3/safe-code-pitfalls-dll-side-loading-winapi-and-c-73baaf48bdf5
 // it allows to set safe DLL search mode for the entire process very early on, before even the CRT is initialized and global constructors are called
@@ -3588,6 +3591,7 @@ extern "C" {
 	}
 }
 #endif
+#endif // #ifndef MOUNT_DLL
 
 /* InitApp - initialize the application, this function is called once in the
    applications WinMain function, but before the main dialog has been created */
@@ -3695,25 +3699,27 @@ void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
 
 	LoadLanguageFile ();
 
-#ifndef SETUP
-	// UAC elevation moniker cannot be used in portable mode.
-	// A new instance of the application must be created with elevated privileges.
-	if (IsNonInstallMode () && !IsAdmin () && IsUacSupported ())
-	{
-
-		if (wcsstr (lpszCommandLine, L"/q UAC ") == lpszCommandLine)
-		{
-			Error ("UAC_INIT_ERROR", NULL);
-			exit (1);
-		}
-
-
-		if (LaunchElevatedProcess (NULL, modPath, lpszCommandLine))
-			exit (0);
-		else
-			exit (1);
-	}
-#endif
+//	// debug - tariq
+//#ifndef SETUP
+//	// UAC elevation moniker cannot be used in portable mode.
+//	// A new instance of the application must be created with elevated privileges.
+//	if (IsNonInstallMode () && !IsAdmin () && IsUacSupported ())
+//	{
+//
+//		if (wcsstr (lpszCommandLine, L"/q UAC ") == lpszCommandLine)
+//		{
+//			Error ("UAC_INIT_ERROR", NULL);
+//			exit (1);
+//		}
+//
+//
+//		if (LaunchElevatedProcess (NULL, modPath, lpszCommandLine))
+//			exit (0);
+//		else
+//			exit (1);
+//	}
+//#endif
+//	// debug - tariq
 
 	SetUnhandledExceptionFilter (ExceptionHandler);
 	_set_invalid_parameter_handler (InvalidParameterHandler);
@@ -4805,6 +4811,67 @@ error:
 	return bOK;
 }
 
+// debug - tariq
+#define MAX_OUT_BUF 4096
+void DlgAppDebugWriteViewInvalidParameterHandler(const wchar_t* expression,
+	const wchar_t* function,
+	const wchar_t* file,
+	unsigned int line,
+	uintptr_t pReserved)
+{
+	throw std::invalid_argument("Invalid parameter.");
+}
+
+void DlgAppDebugWriteViewW(const WCHAR* pwzFmt, ...)
+{
+	int nMaxBuf = 0;
+	SYSTEMTIME  SysTime = { 0 };
+	DWORD       dwFileSize = 0;
+	wchar_t     wzBuffer[MAX_OUT_BUF] = { 0 };
+	wchar_t     wzPrtBuffer[MAX_OUT_BUF] = { 0 };
+
+	//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+	//RtlZeroMemory(&SysTime, sizeof(SysTime));
+
+	if(!pwzFmt) return;
+	
+	va_list	 ap;
+	_invalid_parameter_handler oldHandler, newHandler;
+	va_start( ap, pwzFmt );
+
+	//int nLength = _vsctprintf(pwzFmt, ap);
+	int nLength = _vscwprintf(pwzFmt, ap);
+	try {
+		newHandler = DlgAppDebugWriteViewInvalidParameterHandler;
+		oldHandler = _set_invalid_parameter_handler(newHandler);
+
+		if (nLength + 1 < MAX_OUT_BUF) {
+			vswprintf_s(wzBuffer, nLength + 1, pwzFmt, ap);
+		}
+	}
+	catch (const std::invalid_argument& ia) {
+		_set_invalid_parameter_handler(oldHandler);
+		//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+		return;
+	}
+	_set_invalid_parameter_handler(oldHandler);
+	va_end(ap);
+	
+	nMaxBuf = (MAX_OUT_BUF - 128);
+	if(wcslen(wzBuffer) >= nMaxBuf)
+	{
+		OutputDebugStringW( wzBuffer );
+		return;
+	}
+
+	GetLocalTime( &SysTime );
+	StringCchPrintfW( wzPrtBuffer, MAX_OUT_BUF, 
+					  L"[%04d%02d%02d-%02d:%02d:%02d][pvsu] >> %s \n",  
+			         SysTime.wYear, SysTime.wMonth, SysTime.wDay, SysTime.wHour, SysTime.wMinute, SysTime.wSecond, wzBuffer );
+
+	OutputDebugStringW( wzPrtBuffer );
+}
+// debug - tariq
 
 // Install and start driver service and mark it for removal (non-install mode)
 static int DriverLoad ()
@@ -4830,7 +4897,20 @@ static int DriverLoad ()
 	else
 		*tmp = 0;
 
-	StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\veracrypt-x64.sys");
+	//// debug - tariq
+	//{
+	//	wchar_t tmpPath[TC_MAX_PATH*2] = L"C:\\Users\\sjinlee\\Desktop\\veracrypt\\VeraCrypt";
+	//	memset(driverPath, 0x00, ARRAYSIZE (driverPath));
+	//	memcpy(driverPath, tmpPath, ARRAYSIZE (tmpPath));
+	//}
+
+	//StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\veracrypt-x64.sys");
+	StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\pvsucrypt-x64.sys");
+	// debug - tariq
+	//StringCbCatW (driverPath, sizeof(driverPath), L"\\veracrypt.sys");
+	// debug - tariq
+	//StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\veracrypt-x64.sys");
+	DlgAppDebugWriteViewW(driverPath);
 
 	file = FindFirstFile (driverPath, &find);
 
@@ -4854,7 +4934,8 @@ static int DriverLoad ()
 		return ERR_OS_ERROR;
 	}
 
-	hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	//hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	hService = OpenService (hManager, L"pvsucrypt", SERVICE_ALL_ACCESS);
 	if (hService != NULL)
 	{
 		// Remove stale service (driver is not loaded but service exists)
@@ -4863,7 +4944,8 @@ static int DriverLoad ()
 		Sleep (500);
 	}
 
-	hService = CreateService (hManager, L"veracrypt", L"veracrypt",
+	//hService = CreateService (hManager, L"veracrypt", L"veracrypt",
+	hService = CreateService (hManager, L"pvsucrypt", L"pvsucrypt",
 		SERVICE_ALL_ACCESS, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
 		driverPath, NULL, NULL, NULL, NULL, NULL);
 
@@ -4932,7 +5014,8 @@ BOOL DriverUnload ()
 	if (hManager == NULL)
 		goto error;
 
-	hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	//hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	hService = OpenService (hManager, L"pvsucrypt", SERVICE_ALL_ACCESS);
 	if (hService == NULL)
 		goto error;
 
@@ -4978,9 +5061,14 @@ error:
 	return FALSE;
 }
 
-
 int DriverAttach (void)
 {
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverAttach - begin");
+	}
+	// debug - tariq
+
 	/* Try to open a handle to the device driver. It will be closed later. */
 
 #ifndef SETUP
@@ -4996,10 +5084,22 @@ start:
 	{
 #ifndef SETUP
 
+		// debug - tariq
+		{
+			DlgAppDebugWriteViewW(L"DriverAttach - CreateFile - INVALID_HANDLE_VALUE");
+		}
+		// debug - tariq
+
 		LoadSysEncSettings ();
 
 		if (!CreateDriverSetupMutex ())
 		{
+			// debug - tariq
+			{
+				DlgAppDebugWriteViewW(L"DriverAttach - CreateDriverSetupMutex - false");
+			}
+			// debug - tariq
+
 			// Another instance is already attempting to install, register or start the driver
 
 			while (!CreateDriverSetupMutex ())
@@ -5012,10 +5112,22 @@ start:
 		}
 		else
 		{
+			// debug - tariq
+			{
+				DlgAppDebugWriteViewW(L"DriverAttach - CreateDriverSetupMutex - true");
+			}
+			// debug - tariq
+
 			// No other instance is currently attempting to install, register or start the driver
 
 			if (SystemEncryptionStatus != SYSENC_STATUS_NONE)
 			{
+				// debug - tariq
+				{
+					DlgAppDebugWriteViewW(L"DriverAttach - SYSENC_STATUS_NONE - FALSE");
+				}
+				// debug - tariq
+
 				// This is an inconsistent state. The config file indicates system encryption should be
 				// active, but the driver is not running. This may happen e.g. when the pretest fails and 
 				// the user selects "Last Known Good Configuration" from the Windows boot menu.
@@ -5043,6 +5155,11 @@ start:
 			{
 				// Attempt to load the driver (non-install/portable mode)
 load:
+				// debug - tariq
+				{
+					DlgAppDebugWriteViewW(L"DriverAttach - 1 - DriverLoad");
+				}
+				// debug - tariq
 				BOOL res = DriverLoad ();
 
 				CloseDriverSetupMutex ();
@@ -5066,6 +5183,12 @@ load:
 		if (hDriver == INVALID_HANDLE_VALUE)
 			return ERR_OS_ERROR;
 	}
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverAttach - CloseDriverSetupMutex");
+	}
+	// debug - tariq
 
 	CloseDriverSetupMutex ();
 
@@ -8134,6 +8257,12 @@ BOOL IsDeviceMounted (wchar_t *deviceName)
 
 int DriverUnmountVolume (HWND hwndDlg, int nDosDriveNo, BOOL forced)
 {
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverUnmountVolume - begin");
+	}
+	// debug - tariq
+
 	UNMOUNT_STRUCT unmount;
 	DWORD dwResult;
 	VOLUME_PROPERTIES_STRUCT prop;
@@ -8155,8 +8284,20 @@ int DriverUnmountVolume (HWND hwndDlg, int nDosDriveNo, BOOL forced)
 	unmount.nDosDriveNo = nDosDriveNo;
 	unmount.ignoreOpenFiles = forced;
 
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverUnmountVolume - DeviceIoControl, TC_IOCTL_DISMOUNT_VOLUME - 1, nDosDriveNo: [%d], forced: [%d]", nDosDriveNo, forced);
+	}
+	// debug - tariq
+
 	bResult = DeviceIoControl (hDriver, TC_IOCTL_DISMOUNT_VOLUME, &unmount,
 			sizeof (unmount), &unmount, sizeof (unmount), &dwResult, NULL);
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverUnmountVolume - DeviceIoControl, TC_IOCTL_DISMOUNT_VOLUME: bResult: [%d], dwResult: [%d]", bResult, dwResult);
+	}
+	// debug - tariq
 
 	if (bResult == FALSE)
 	{
@@ -8182,6 +8323,12 @@ int DriverUnmountVolume (HWND hwndDlg, int nDosDriveNo, BOOL forced)
 	}
 
 #endif	// #ifdef TCMOUNT
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"DriverUnmountVolume - end, nReturnCode: [%d]", unmount.nReturnCode);
+	}
+	// debug - tariq
 
 	return unmount.nReturnCode;
 }
@@ -9046,6 +9193,12 @@ typedef struct
 
 void CALLBACK UnmountWaitThreadProc(void* pArg, HWND hwnd)
 {
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"UnmountWaitThreadProc - begin");
+	}
+	// debug - tariq
+
 	UnmountThreadParam* pThreadParam = (UnmountThreadParam*) pArg;
 	int dismountMaxRetries = pThreadParam->dismountMaxRetries;
 	DWORD retryDelay = pThreadParam->retryDelay;
@@ -9062,10 +9215,22 @@ void CALLBACK UnmountWaitThreadProc(void* pArg, HWND hwnd)
 	} while (--dismountMaxRetries > 0);
 
 	pThreadParam->dwLastError = GetLastError ();
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"UnmountWaitThreadProc - end, pThreadParam->dwLastError: [%d]", pThreadParam->dwLastError);
+	}
+	// debug - tariq
 }
 
 static BOOL UnmountVolumeBase (HWND hwndDlg, int nDosDriveNo, BOOL forceUnmount, BOOL ntfsFormatCase)
 {
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"UnmountVolumeBase - begin");
+	}
+	// debug - tariq
+
 	int result;
 	BOOL forced = forceUnmount;
 	int dismountMaxRetries = ntfsFormatCase? 5 : UNMOUNT_MAX_AUTO_RETRIES;
@@ -9080,6 +9245,12 @@ retry:
 	param.dismountMaxRetries = dismountMaxRetries;
 	param.retryDelay = retryDelay;
 	param.presult = &result;
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"UnmountVolumeBase - Silent: [%d]", Silent);
+	}
+	// debug - tariq
 
 	if (Silent)
 	{
@@ -9115,6 +9286,12 @@ retry:
 	}
 
 	BroadcastDeviceChange (DBT_DEVICEREMOVECOMPLETE, nDosDriveNo, 0);
+
+	// debug - tariq
+	{
+		DlgAppDebugWriteViewW(L"UnmountVolumeBase - end");
+	}
+	// debug - tariq
 
 	return TRUE;
 }

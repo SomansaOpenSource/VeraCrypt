@@ -224,9 +224,15 @@
     <ClCompile Include="SerpentFast_simd.cpp" />
     <ClCompile Include="Sha2.c" />
     <ClCompile Include="Streebog.c" />
-    <ClCompile Include="t1ha2.c" />
-    <ClCompile Include="t1ha2_selfcheck.c" />
-    <ClCompile Include="t1ha_selfcheck.c" />
+    <ClCompile Include="t1ha2.c">
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4100;4127;4201;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="t1ha2_selfcheck.c">
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4100;4127;4201;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+    <ClCompile Include="t1ha_selfcheck.c">
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='Release|x64'">4100;4127;4201;4819;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
     <ClCompile Include="Twofish.c" />
     <ClCompile Include="Whirlpool.c" />
   </ItemGroup>

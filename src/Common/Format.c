@@ -13,6 +13,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+// debug - tariq
+#include <stdarg.h>
+// debug - tariq
 
 #include "Tcdefs.h"
 
@@ -40,6 +43,74 @@
 int FormatWriteBufferSize = 1024 * 1024;
 static uint32 FormatSectorSize = 0;
 
+// debug - tariq
+#ifndef MAX_OUT_BUF
+#define MAX_OUT_BUF 4096
+#endif
+//void FormatAppDebugWriteViewInvalidParameterHandler(const wchar_t* expression,
+//	const wchar_t* function,
+//	const wchar_t* file,
+//	unsigned int line,
+//	uintptr_t pReserved)
+//{
+//	throw std::invalid_argument("Invalid parameter.");
+//}
+
+void FormatAppDebugWriteViewW(const WCHAR* pwzFmt, ...)
+{
+	int nMaxBuf = 0;
+	SYSTEMTIME  SysTime = { 0 };
+	//DWORD       dwFileSize = 0;
+	wchar_t     wzBuffer[MAX_OUT_BUF] = { 0 };
+	wchar_t     wzPrtBuffer[MAX_OUT_BUF] = { 0 };
+	// debug - tariq - rog
+	int nLength = 0;
+	// debug - tariq - rog
+
+	//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+	//RtlZeroMemory(&SysTime, sizeof(SysTime));
+
+	// debug - tariq - rog
+	//if(!pwzFmt) return;
+	// debug - tariq - rog
+	
+	va_list	 ap;
+	//_invalid_parameter_handler oldHandler, newHandler;
+	va_start( ap, pwzFmt );
+
+	//int nLength = _vsctprintf(pwzFmt, ap);
+	/*int */nLength = _vscwprintf(pwzFmt, ap);
+	//try {
+		//newHandler = FormatAppDebugWriteViewInvalidParameterHandler;
+		//oldHandler = _set_invalid_parameter_handler(newHandler);
+
+		if (nLength + 1 < MAX_OUT_BUF) {
+			vswprintf_s(wzBuffer, nLength + 1, pwzFmt, ap);
+		}
+	//}
+	//catch (const std::invalid_argument& ia) {
+	//	//_set_invalid_parameter_handler(oldHandler);
+	//	//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+	//	return;
+	//}
+	//_set_invalid_parameter_handler(oldHandler);
+	va_end(ap);
+	
+	nMaxBuf = (MAX_OUT_BUF - 128);
+	if(wcslen(wzBuffer) >= nMaxBuf)
+	{
+		OutputDebugStringW( wzBuffer );
+		return;
+	}
+
+	GetLocalTime( &SysTime );
+	StringCchPrintfW( wzPrtBuffer, MAX_OUT_BUF, 
+					  L"[%04d%02d%02d-%02d:%02d:%02d][pvsuformat] >> %s \n",  
+			         SysTime.wYear, SysTime.wMonth, SysTime.wDay, SysTime.wHour, SysTime.wMinute, SysTime.wSecond, wzBuffer );
+
+	OutputDebugStringW( wzPrtBuffer );
+}
+// debug - tariq
 
 uint64 GetVolumeDataAreaSize (BOOL hiddenVolume, uint64 volumeSize)
 {
@@ -174,6 +245,24 @@ int TCFormatVolume (volatile FORMAT_VOL_PARAMETERS *volParams)
 		VirtualUnlock (header, sizeof (header));
 		return nStatus? nStatus : ERR_OUTOFMEMORY;
 	}
+
+	// debug - tariq
+	{
+		char key[SHA256_DIGESTSIZE];
+
+		sha256_ctx tctx;
+
+		sha256_begin (&tctx);
+		sha256_hash ((unsigned char *) cryptoInfo->master_keydata, MASTER_KEYDATA_SIZE, &tctx);
+		sha256_end ((unsigned char *) key, &tctx);
+
+		//volParams->volPasswordHash->Text = key;
+		memcpy (volParams->volPasswordHash->Text, key, SHA256_DIGESTSIZE);
+		volParams->volPasswordHash->Length = SHA256_DIGESTSIZE;
+
+		burn (&tctx, sizeof(tctx));		// Prevent leaks
+	}
+	// debug - tariq
 
 #ifdef _WIN64
 	if (IsRamEncryptionEnabled ())
@@ -374,7 +463,6 @@ begin_format:
 		dev = CreateFile (volParams->volumePath, GENERIC_READ | GENERIC_WRITE,
 			(volParams->hiddenVol || bInstantRetryOtherFilesys) ? (FILE_SHARE_READ | FILE_SHARE_WRITE) : 0,
 			NULL, (volParams->hiddenVol || bInstantRetryOtherFilesys) ? OPEN_EXISTING : CREATE_ALWAYS, 0, NULL);
-
 		if (dev == INVALID_HANDLE_VALUE)
 		{
 			nStatus = ERR_OS_ERROR;
@@ -577,16 +665,34 @@ begin_format:
 	case FILESYS_EXFAT:
 	case FILESYS_REFS:
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - FormatNoFs - 0000: volParams->bDevice: [%d]", volParams->bDevice);
+		}
+		// debug - tariq
+
 		if (volParams->bDevice && !StartFormatWriteThread())
 		{
 			nStatus = ERR_OS_ERROR;
 			goto error;
 		}
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - FormatNoFs - 1111");
+		}
+		// debug - tariq
+
 		nStatus = FormatNoFs (hwndDlg, startSector, num_sectors, dev, cryptoInfo, volParams->quickFormat, volParams->bDevice);
 
 		if (volParams->bDevice)
 			StopFormatWriteThread();
+
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - FormatNoFs - nStatus: [%d]", nStatus);
+		}
+		// debug - tariq
 
 		break;
 
@@ -830,6 +936,12 @@ error:
 		mountOptions.PartitionInInactiveSysEncScope = FALSE;
 		mountOptions.UseBackupHeader = FALSE;
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - begin - MountVolume: [%d]", driveNo);
+		}
+		// debug - tariq
+
 		if (MountVolume (volParams->hwndDlg, driveNo, volParams->volumePath, volParams->password, volParams->pkcs5, volParams->pim, FALSE, FALSE, TRUE, &mountOptions, Silent, TRUE) < 1)
 		{
 			if (!Silent)
@@ -841,7 +953,18 @@ error:
 			goto fv_end;
 		}
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - end - MountVolume, fsType: [%d]", fsType);
+		}
+		// debug - tariq
+
 		retCode = ExternalFormatFs (driveNo, volParams->clusterSize, fsType);
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - end - ExternalFormatFs - retCode: [%d], volParams->clusterSize: [%d]", retCode, volParams->clusterSize);
+		}
+		// debug - tariq
 		if (retCode != 0)
 		{
 
@@ -851,6 +974,12 @@ error:
 			else
 				retCode = FormatFs (driveNo, volParams->clusterSize, fsType, FALSE); /* no need to fallback to format.com since we have already tried it without elevation */
 			
+			// debug - tariq
+			{
+				FormatAppDebugWriteViewW(L"TCFormatVolume - end - FormatFs - retCode: [%d], fsType: [%d]", retCode, fsType);
+			}
+			// debug - tariq
+
 			if (retCode != 0)
 			{
 				wchar_t auxLine[2048];
@@ -859,6 +988,11 @@ error:
 			}
 		}
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"TCFormatVolume - end - ExternalFormatFs - 1 - retCode: [%d]", retCode);
+		}
+		// debug - tariq
 		if (retCode != 0)
 		{
 			if (!UnmountVolumeAfterFormatExCall (volParams->hwndDlg, driveNo) && !Silent)
@@ -918,6 +1052,12 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 #ifdef _WIN64
 	CRYPTO_INFO tmpCI;
 #endif
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatNoFs - begin, quickFormat: [%d], bDevice: [%d]", quickFormat, bDevice);
+	}
+	// debug - tariq
 
 	// Seek to start sector
 	startOffset.QuadPart = startSector * FormatSectorSize;
@@ -980,6 +1120,11 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 			VcProtectKeys (cryptoInfo, VcGetEncryptionID (cryptoInfo));
 #endif
 
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"FormatNoFs - !quickFormat, num_sectors: [%I64d]", num_sectors);
+		}
+		// debug - tariq
 		while (num_sectors--)
 		{
 			if (WriteSector (dev, sector, write_buf, &write_buf_cnt, &nSecNo, startSector,
@@ -995,6 +1140,12 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 	}
 	else if (!bDevice)
 	{
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"FormatNoFs - !bDevice - num_sectors: [%I64d], nSkipSectors: [%I64d], FormatSectorSize: [%d]", num_sectors, nSkipSectors, FormatSectorSize);
+		}
+		// debug - tariq
+
 		// Quick format: write a zeroed sector every 128 MiB, leaving other sectors untouched
 		// This helps users visualize the progress of actual file creation while forcing Windows
 		// to allocate the disk space of each 128 MiB chunk immediately, otherwise, Windows 
@@ -1002,6 +1153,12 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 		// would make the user think that the format process has stalled after progress bar reaches 100%.
 		while (num_sectors >= nSkipSectors)
 		{
+			// debug - tariq
+			{
+				FormatAppDebugWriteViewW(L"FormatNoFs - !bDevice - 1 - nSecNo: [%I64d]", nSecNo);
+			}
+			// debug - tariq
+
 			// seek to next sector to be written
 			nSecNo += (nSkipSectors - 1);
 			startOffset.QuadPart = nSecNo * FormatSectorSize;
@@ -1010,18 +1167,34 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 				goto fail;
 			}
 			
+			// debug - tariq
+			{
+				FormatAppDebugWriteViewW(L"FormatNoFs - !bDevice - 2 - nSecNo: [%I64d]", nSecNo);
+			}
+			// debug - tariq
+
 			// sector array has been zeroed above
 			if (!WriteFile ((HANDLE) dev, sector, FormatSectorSize, &bytesWritten, NULL) 
 				|| bytesWritten != FormatSectorSize)
 			{
 				goto fail;
 			}
+			// debug - tariq
+			{
+				FormatAppDebugWriteViewW(L"FormatNoFs - !bDevice - 3 - bytesWritten: [%d]", bytesWritten);
+			}
+			// debug - tariq
 			
 			nSecNo++;
 			num_sectors -= nSkipSectors;
 
 			if (UpdateProgressBar ((nSecNo - startSector)* FormatSectorSize))
 				goto fail;
+			// debug - tariq
+			{
+				FormatAppDebugWriteViewW(L"FormatNoFs - !bDevice - 4 - num_sectors: [%I64d]", num_sectors);
+			}
+			// debug - tariq
 		}
 		
 		nSecNo += num_sectors;
@@ -1059,6 +1232,13 @@ int FormatNoFs (HWND hwndDlg, unsigned __int64 startSector, unsigned __int64 num
 	}
 #endif
 
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatNoFs - end");
+	}
+	// debug - tariq
+
 	return 0;
 
 fail:
@@ -1076,6 +1256,12 @@ fail:
 		VirtualUnlock (&tmpCI, sizeof (tmpCI));
 	}
 #endif
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatNoFs - fail - end");
+	}
+	// debug - tariq
 
 	SetLastError (err);
 	return (retVal ? retVal : ERR_OS_ERROR);
@@ -1241,10 +1427,21 @@ int FormatFs (int driveNo, int clusterSize, int fsType, BOOL bFallBackExternal)
 		FormatExError = FALSE;
 		FormatExErrorCommand = 0;
 		FormatEx (dir, FMIFS_REMOVAL, szFsFormat, szLabel, TRUE, clusterSize * FormatSectorSize, FormatExCallback);
+		// debug - tariq
+		{
+			FormatAppDebugWriteViewW(L"FormatFs - i: [%d], clusterSize: [%d]", i, clusterSize);
+		}
+		// debug - tariq
 	}
 
 	// The device may be referenced for some time after FormatEx() returns
 	Sleep (4000);
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatFs - FormatSectorSize: [%d], bFallBackExternal: [%d], FormatExError: [%d]", FormatSectorSize, bFallBackExternal, (int)FormatExError);
+	}
+	// debug - tariq
 
 	FreeLibrary (hModule);
 
@@ -1252,6 +1449,12 @@ int FormatFs (int driveNo, int clusterSize, int fsType, BOOL bFallBackExternal)
 	{
 		return ExternalFormatFs (driveNo, clusterSize, fsType);
 	}
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatFs - end - FormatExErrorCommand: [%d], FormatExError: [%d]", FormatExErrorCommand, (int)FormatExError);
+	}
+	// debug - tariq
 
 	return FormatExError? FormatExErrorCommand : 0;
 }
@@ -1313,6 +1516,11 @@ int ExternalFormatFs (int driveNo, int clusterSize, int fsType)
 		StringCbCat (szCmdline, sizeof (szCmdline), szSize);
 	}
 
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"ExternalFormatFs - szCmdline: [%s]", szCmdline);
+	}
+	// debug - tariq
  
    ZeroMemory( &piProcInfo, sizeof(PROCESS_INFORMATION) ); 
 
@@ -1342,6 +1550,12 @@ int ExternalFormatFs (int driveNo, int clusterSize, int fsType)
 	   /* wait for the format process to finish */
 	   WaitForSingleObject (piProcInfo.hProcess, INFINITE);
 
+	   // debug - tariq
+	   {
+		   FormatAppDebugWriteViewW(L"ExternalFormatFs - end - CreateProcess");
+	   }
+	   // debug - tariq
+
 	   /* check if it was successfull */	   
 	   if (GetExitCodeProcess (piProcInfo.hProcess, &dwExitCode))
 	   {
@@ -1357,6 +1571,12 @@ int ExternalFormatFs (int driveNo, int clusterSize, int fsType)
    {
 	   iRet = (int) GetLastError();
    }
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"ExternalFormatFs - end");
+	}
+	// debug - tariq
 
    return iRet;
 }
@@ -1405,6 +1625,12 @@ static void __cdecl FormatWriteThreadProc (void *arg)
 {
 	DWORD bytesWritten;
 
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatWriteThreadProc - begin");
+	}
+	// debug - tariq
+
 	SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	while (!WriteThreadExitRequested)
@@ -1430,6 +1656,12 @@ static void __cdecl FormatWriteThreadProc (void *arg)
 		}
 	}
 
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"FormatWriteThreadProc - end");
+	}
+	// debug - tariq
+
 	WriteThreadRunning = FALSE;
 	_endthread();
 }
@@ -1442,6 +1674,12 @@ static BOOL StartFormatWriteThread ()
 	WriteBufferEmptyEvent = NULL;
 	WriteBufferFullEvent = NULL;
 	WriteThreadBuffer = NULL;
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"StartFormatWriteThread - begin");
+	}
+	// debug - tariq
 
 	WriteBufferEmptyEvent = CreateEvent (NULL, FALSE, TRUE, NULL);
 	if (!WriteBufferEmptyEvent)
@@ -1464,6 +1702,12 @@ static BOOL StartFormatWriteThread ()
 	WriteThreadHandle = (HANDLE) _beginthread (FormatWriteThreadProc, 0, NULL);
 	if ((uintptr_t) WriteThreadHandle == -1L)
 		goto err;
+
+	// debug - tariq
+	{
+		FormatAppDebugWriteViewW(L"StartFormatWriteThread - end");
+	}
+	// debug - tariq
 
 	WriteThreadRunning = TRUE;
 	return TRUE;
