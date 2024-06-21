@@ -390,8 +390,9 @@ typedef struct
 
 } MULTI_CHOICE_DLGPROC_PARAMS;
 
-
-
+#ifdef TCMOUNT
+int MountReturnCode = ERR_SUCCESS;
+#endif
 
 // Loads a 32-bit integer from the file at the specified file offset. The saved value is assumed to have been
 // processed by mputLong(). The result is stored in *result. Returns TRUE if successful (otherwise FALSE).
@@ -9040,6 +9041,9 @@ retry:
 		return -1;
 	}
 
+#ifdef TCMOUNT
+	MountReturnCode = mount.nReturnCode;
+#endif
 	if (mount.nReturnCode != 0)
 	{
 		if (mount.nReturnCode == ERR_PASSWORD_WRONG)

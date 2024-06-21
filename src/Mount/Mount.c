@@ -212,6 +212,8 @@ static WTSUNREGISTERSESSIONNOTIFICATION fnWtsUnRegisterSessionNotification = NUL
 // https://docs.microsoft.com/en-us/windows/win32/w8cookbook/desktop-activity-moderator?redirectedfrom=MSDN
 static HPOWERNOTIFY  g_hPowerNotify = NULL;
 
+extern int MountReturnCode;
+
 static void RegisterWtsAndPowerNotification(HWND hWnd)
 {
 	if (!hWtsLib)
