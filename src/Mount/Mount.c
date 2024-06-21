@@ -12785,6 +12785,14 @@ extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam
 					szFileName, &CmdVolumePassword, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount,
 					&mountOptions, Silent, reportBadPasswd);
 
+				if (!mounted)
+				{
+					exitCode = MountReturnCode;
+					// debug - tariq
+					AppDebugWriteViewW(L"ConnectSecureDrive - mount failed.[%d]", MountReturnCode);
+					// debug - tariq
+				}
+
 				burn (&CmdVolumePassword, sizeof (CmdVolumePassword));
 			}
 			else
