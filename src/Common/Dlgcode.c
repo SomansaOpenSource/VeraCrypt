@@ -322,7 +322,7 @@ static unsigned char gpbSha512MSCodeSignCertFingerprint[64] = {
 #define WINDOWS_DIALOG_CLASS L"#32770"
 
 /* Custom class names */
-#define TC_DLG_CLASS L"VeraCryptCustomDlg"
+#define TC_DLG_CLASS L"PvsuCryptCustomDlg"
 #define TC_SPLASH_CLASS L"VeraCryptSplashDlg"
 
 /* constant used by ChangeWindowMessageFilter calls */
@@ -390,8 +390,9 @@ typedef struct
 
 } MULTI_CHOICE_DLGPROC_PARAMS;
 
-
-
+#ifdef TCMOUNT
+int MountReturnCode = ERR_SUCCESS;
+#endif
 
 // Loads a 32-bit integer from the file at the specified file offset. The saved value is assumed to have been
 // processed by mputLong(). The result is stored in *result. Returns TRUE if successful (otherwise FALSE).
@@ -859,9 +860,10 @@ BOOL VerifyModuleSignature (const wchar_t* path)
 	WINTRUST_DATA      WVTData = {0};
 	wchar_t filePath [TC_MAX_PATH + 1024];
 
+	// added for pvsucrypt
     // we check our own authenticode signature only starting from Windows 10 since this is
 	// the minimal supported OS apart from XP where we can't verify SHA256 signatures
-	if (!IsOSAtLeast (WIN_10))
+	//if (!IsOSAtLeast (WIN_10))
 		return TRUE;
 
 	// Strip quotation marks (if any)
@@ -3556,6 +3558,7 @@ void DoPostInstallTasks (HWND hwndDlg)
 		SavePostInstallTasksSettings (TC_POST_INSTALL_CFG_REMOVE_ALL);
 }
 
+#ifndef MOUNT_DLL
 #ifndef SETUP_DLL
 // Use an idea proposed in https://medium.com/@1ndahous3/safe-code-pitfalls-dll-side-loading-winapi-and-c-73baaf48bdf5
 // it allows to set safe DLL search mode for the entire process very early on, before even the CRT is initialized and global constructors are called
@@ -3588,6 +3591,7 @@ extern "C" {
 	}
 }
 #endif
+#endif // #ifndef MOUNT_DLL
 
 /* InitApp - initialize the application, this function is called once in the
    applications WinMain function, but before the main dialog has been created */
@@ -3695,25 +3699,25 @@ void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
 
 	LoadLanguageFile ();
 
-#ifndef SETUP
-	// UAC elevation moniker cannot be used in portable mode.
-	// A new instance of the application must be created with elevated privileges.
-	if (IsNonInstallMode () && !IsAdmin () && IsUacSupported ())
-	{
-
-		if (wcsstr (lpszCommandLine, L"/q UAC ") == lpszCommandLine)
-		{
-			Error ("UAC_INIT_ERROR", NULL);
-			exit (1);
-		}
-
-
-		if (LaunchElevatedProcess (NULL, modPath, lpszCommandLine))
-			exit (0);
-		else
-			exit (1);
-	}
-#endif
+//#ifndef SETUP
+//	// UAC elevation moniker cannot be used in portable mode.
+//	// A new instance of the application must be created with elevated privileges.
+//	if (IsNonInstallMode () && !IsAdmin () && IsUacSupported ())
+//	{
+//
+//		if (wcsstr (lpszCommandLine, L"/q UAC ") == lpszCommandLine)
+//		{
+//			Error ("UAC_INIT_ERROR", NULL);
+//			exit (1);
+//		}
+//
+//
+//		if (LaunchElevatedProcess (NULL, modPath, lpszCommandLine))
+//			exit (0);
+//		else
+//			exit (1);
+//	}
+//#endif
 
 	SetUnhandledExceptionFilter (ExceptionHandler);
 	_set_invalid_parameter_handler (InvalidParameterHandler);
@@ -4805,6 +4809,67 @@ error:
 	return bOK;
 }
 
+// -
+void AppDebugWriteViewInvalidParameterHandler(const wchar_t* expression,
+	const wchar_t* function,
+	const wchar_t* file,
+	unsigned int line,
+	uintptr_t pReserved)
+{
+	throw std::invalid_argument("Invalid parameter.");
+}
+
+void AppDebugWriteViewW(const WCHAR* pwzFmt, ...)
+{
+	int nMaxBuf = 0;
+	SYSTEMTIME  SysTime = { 0 };
+	DWORD       dwFileSize = 0;
+	wchar_t     wzBuffer[MAX_OUT_BUF] = { 0 };
+	wchar_t     wzPrtBuffer[MAX_OUT_BUF] = { 0 };
+
+	//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+	//RtlZeroMemory(&SysTime, sizeof(SysTime));
+
+	if(!pwzFmt) return;
+	
+	va_list	 ap;
+	_invalid_parameter_handler oldHandler, newHandler;
+	va_start( ap, pwzFmt );
+
+	//int nLength = _vsctprintf(pwzFmt, ap);
+	int nLength = _vscwprintf(pwzFmt, ap);
+	try {
+		//newHandler = DlgAppDebugWriteViewInvalidParameterHandler;
+		newHandler = AppDebugWriteViewInvalidParameterHandler;
+		oldHandler = _set_invalid_parameter_handler(newHandler);
+
+		if (nLength + 1 < MAX_OUT_BUF) {
+			vswprintf_s(wzBuffer, nLength + 1, pwzFmt, ap);
+		}
+	}
+	catch (const std::invalid_argument& ia) {
+		_set_invalid_parameter_handler(oldHandler);
+		//RtlZeroMemory(wzBuffer, sizeof(wzBuffer));
+		return;
+	}
+	_set_invalid_parameter_handler(oldHandler);
+	va_end(ap);
+	
+	nMaxBuf = (MAX_OUT_BUF - 128);
+	if(wcslen(wzBuffer) >= nMaxBuf)
+	{
+		OutputDebugStringW( wzBuffer );
+		return;
+	}
+
+	GetLocalTime( &SysTime );
+	StringCchPrintfW( wzPrtBuffer, MAX_OUT_BUF, 
+					  L"[%04d%02d%02d-%02d:%02d:%02d][pvsu] >> %s \n",  
+			         SysTime.wYear, SysTime.wMonth, SysTime.wDay, SysTime.wHour, SysTime.wMinute, SysTime.wSecond, wzBuffer );
+
+	OutputDebugStringW( wzPrtBuffer );
+}
+// -
 
 // Install and start driver service and mark it for removal (non-install mode)
 static int DriverLoad ()
@@ -4830,13 +4895,15 @@ static int DriverLoad ()
 	else
 		*tmp = 0;
 
-	StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\veracrypt-x64.sys");
+	//StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\veracrypt-x64.sys");
+	StringCbCatW (driverPath, sizeof(driverPath), !Is64BitOs () ? L"\\veracrypt.sys" : IsARM()? L"\\veracrypt-arm64.sys" : L"\\pvsucrypt-x64.sys");
 
 	file = FindFirstFile (driverPath, &find);
 
 	if (file == INVALID_HANDLE_VALUE)
 	{
 		MessageBoxW (0, GetString ("DRIVER_NOT_FOUND"), lpszTitle, ICON_HAND);
+		AppDebugWriteViewW(L"DRIVER_NOT_FOUND: [%s]", driverPath);
 		return ERR_DONT_REPORT;
 	}
 
@@ -4854,7 +4921,8 @@ static int DriverLoad ()
 		return ERR_OS_ERROR;
 	}
 
-	hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	//hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	hService = OpenService (hManager, L"pvsucrypt", SERVICE_ALL_ACCESS);
 	if (hService != NULL)
 	{
 		// Remove stale service (driver is not loaded but service exists)
@@ -4863,7 +4931,8 @@ static int DriverLoad ()
 		Sleep (500);
 	}
 
-	hService = CreateService (hManager, L"veracrypt", L"veracrypt",
+	//hService = CreateService (hManager, L"veracrypt", L"veracrypt",
+	hService = CreateService (hManager, L"pvsucrypt", L"pvsucrypt",
 		SERVICE_ALL_ACCESS, SERVICE_KERNEL_DRIVER, SERVICE_DEMAND_START, SERVICE_ERROR_NORMAL,
 		driverPath, NULL, NULL, NULL, NULL, NULL);
 
@@ -4932,7 +5001,8 @@ BOOL DriverUnload ()
 	if (hManager == NULL)
 		goto error;
 
-	hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	//hService = OpenService (hManager, L"veracrypt", SERVICE_ALL_ACCESS);
+	hService = OpenService (hManager, L"pvsucrypt", SERVICE_ALL_ACCESS);
 	if (hService == NULL)
 		goto error;
 
@@ -5048,7 +5118,10 @@ load:
 				CloseDriverSetupMutex ();
 
 				if (res != ERROR_SUCCESS)
+				{
+					AppDebugWriteViewW(L"%S(%d) - DriverLoad fail: [%d]", __FUNCTION__, __LINE__, res);
 					return res;
+				}
 
 				bPortableModeConfirmed = TRUE;
 			
@@ -5064,7 +5137,10 @@ load:
 #endif	// #ifndef SETUP
 
 		if (hDriver == INVALID_HANDLE_VALUE)
+		{
+			AppDebugWriteViewW(L"%S(%d) - Driver invalid", __FUNCTION__, __LINE__);
 			return ERR_OS_ERROR;
+		}
 	}
 
 	CloseDriverSetupMutex ();
@@ -8160,6 +8236,7 @@ int DriverUnmountVolume (HWND hwndDlg, int nDosDriveNo, BOOL forced)
 
 	if (bResult == FALSE)
 	{
+		AppDebugWriteViewW(L"%S(%d) - TC_IOCTL_DISMOUNT_VOLUME: bResult: [%d], dwResult: [%d]", __FUNCTION__, __LINE__, bResult, dwResult);
 		handleWin32Error (hwndDlg, SRC_POS);
 		return 1;
 	}
@@ -8183,6 +8260,7 @@ int DriverUnmountVolume (HWND hwndDlg, int nDosDriveNo, BOOL forced)
 
 #endif	// #ifdef TCMOUNT
 
+	AppDebugWriteViewW(L"%S(%d) - end, ReturnCode: [%d]", __FUNCTION__, __LINE__, unmount.nReturnCode);
 	return unmount.nReturnCode;
 }
 
@@ -8893,6 +8971,9 @@ retry:
 		return -1;
 	}
 
+#ifdef TCMOUNT
+	MountReturnCode = mount.nReturnCode;
+#endif
 	if (mount.nReturnCode != 0)
 	{
 		if (mount.nReturnCode == ERR_PASSWORD_WRONG)
@@ -9109,6 +9190,7 @@ retry:
 			return FALSE;
 		}
 
+		AppDebugWriteViewW(L"%S(%d) - UNMOUNT_FAILED", __FUNCTION__, __LINE__);
 		Error ("UNMOUNT_FAILED", hwndDlg);
 
 		return FALSE;

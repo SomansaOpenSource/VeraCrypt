@@ -457,8 +457,10 @@ KeyReady:	;
 
 				DecryptBuffer (header + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, cryptoInfo);
 
-				// Magic 'VERA'
-				if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)
+				/*// Magic 'VERA'
+				if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241)*/
+				// Magic 'PVSU'
+				if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x50565355)
 					continue;
 
 				// Header version
@@ -770,7 +772,8 @@ int ReadVolumeHeader (BOOL bBoot, char *header, Password *password, int pim, PCR
 		DecryptBuffer (header + HEADER_ENCRYPTED_DATA_OFFSET, HEADER_ENCRYPTED_DATA_SIZE, cryptoInfo);
 
 		// Check magic 'VERA' and CRC-32 of header fields and master keydata
-		if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241
+		/*if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x56455241*/
+		if (GetHeaderField32 (header, TC_HEADER_OFFSET_MAGIC) != 0x50565355
 			|| (GetHeaderField16 (header, TC_HEADER_OFFSET_VERSION) >= 4 && GetHeaderField32 (header, TC_HEADER_OFFSET_HEADER_CRC) != GetCrc32 (header + TC_HEADER_OFFSET_MAGIC, TC_HEADER_OFFSET_HEADER_CRC - TC_HEADER_OFFSET_MAGIC))
 			|| GetHeaderField32 (header, TC_HEADER_OFFSET_KEY_AREA_CRC) != GetCrc32 (header + HEADER_MASTER_KEYDATA_OFFSET, MASTER_KEYDATA_SIZE))
 		{
@@ -1043,7 +1046,8 @@ int CreateVolumeHeaderInMemory (HWND hwndDlg, BOOL bBoot, char *header, int ea, 
 	mputBytes (p, keyInfo.salt, PKCS5_SALT_SIZE);
 
 	// Magic
-	mputLong (p, 0x56455241);
+	/*mputLong (p, 0x56455241);*/
+	mputLong (p, 0x50565355);
 
 	// Header version
 	mputWord (p, VOLUME_HEADER_VERSION);

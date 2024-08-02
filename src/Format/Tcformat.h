@@ -105,5 +105,6 @@ extern wchar_t MasterKeyGUIView [KEY_GUI_VIEW_SIZE];
 extern volatile int NonSysInplaceEncStatus;
 
 #ifdef __cplusplus
+extern "C" _declspec(dllexport) int __cdecl CreateSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2, char* pszParam3, int nParam3Length, char* pszParam4, int* nParam4Length);
 }
 #endif

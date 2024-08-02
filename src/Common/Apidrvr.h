@@ -399,15 +399,25 @@ typedef struct
 
 #define DRIVER_STR WIDE
 
-#define TC_UNIQUE_ID_PREFIX "VeraCryptVolume"
-#define TC_MOUNT_PREFIX L"\\Device\\VeraCryptVolume"
+//#define TC_UNIQUE_ID_PREFIX "VeraCryptVolume"
+//#define TC_MOUNT_PREFIX L"\\Device\\VeraCryptVolume"
+//
+//#define NT_MOUNT_PREFIX DRIVER_STR("\\Device\\VeraCryptVolume")
+//#define NT_ROOT_PREFIX DRIVER_STR("\\Device\\VeraCrypt")
+//#define DOS_MOUNT_PREFIX_DEFAULT DRIVER_STR("\\DosDevices\\")
+//#define DOS_MOUNT_PREFIX_GLOBAL DRIVER_STR("\\GLOBAL??\\") // Use Global MS-DOS device names for sanity checks on drive letters
+//#define DOS_ROOT_PREFIX DRIVER_STR("\\DosDevices\\VeraCrypt")
+//#define WIN32_ROOT_PREFIX DRIVER_STR("\\\\.\\VeraCrypt")
 
-#define NT_MOUNT_PREFIX DRIVER_STR("\\Device\\VeraCryptVolume")
-#define NT_ROOT_PREFIX DRIVER_STR("\\Device\\VeraCrypt")
+#define TC_UNIQUE_ID_PREFIX "PvsuCryptVolume"
+#define TC_MOUNT_PREFIX L"\\Device\\PvsuCryptVolume"
+
+#define NT_MOUNT_PREFIX DRIVER_STR("\\Device\\PvsuCryptVolume")
+#define NT_ROOT_PREFIX DRIVER_STR("\\Device\\PvsuCrypt")
 #define DOS_MOUNT_PREFIX_DEFAULT DRIVER_STR("\\DosDevices\\")
 #define DOS_MOUNT_PREFIX_GLOBAL DRIVER_STR("\\GLOBAL??\\") // Use Global MS-DOS device names for sanity checks on drive letters
-#define DOS_ROOT_PREFIX DRIVER_STR("\\DosDevices\\VeraCrypt")
-#define WIN32_ROOT_PREFIX DRIVER_STR("\\\\.\\VeraCrypt")
+#define DOS_ROOT_PREFIX DRIVER_STR("\\DosDevices\\PvsuCrypt")
+#define WIN32_ROOT_PREFIX DRIVER_STR("\\\\.\\PvsuCrypt")
 
 #define TC_DRIVER_CONFIG_REG_VALUE_NAME DRIVER_STR("VeraCryptConfig")
 #define TC_ENCRYPTION_FREE_CPU_COUNT_REG_VALUE_NAME DRIVER_STR("VeraCryptEncryptionFreeCpuCount")

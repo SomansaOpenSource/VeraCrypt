@@ -208,6 +208,8 @@ static WTSUNREGISTERSESSIONNOTIFICATION fnWtsUnRegisterSessionNotification = NUL
 // https://docs.microsoft.com/en-us/windows/win32/w8cookbook/desktop-activity-moderator?redirectedfrom=MSDN
 static HPOWERNOTIFY  g_hPowerNotify = NULL;
 
+extern int MountReturnCode;		// added
+
 static void RegisterWtsAndPowerNotification(HWND hWnd)
 {
 	if (!hWtsLib)
@@ -10115,7 +10117,7 @@ int WINAPI wWinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, wchar_t *lpsz
 	RegisterRedTick(hInstance);
 
 	/* Allocate, dup, then store away the application title */
-	lpszTitle = L"VeraCrypt";
+	lpszTitle = L"PvsuCrypt";
 
 	status = DriverAttach ();
 	if (status != 0)
@@ -12580,4 +12582,297 @@ void HookMouseWheel (HWND hwndDlg, UINT ctrlId)
 
 	SetWindowLongPtrW (hwndCtrl, GWLP_USERDATA, (LONG_PTR) GetWindowLongPtrW (hwndCtrl, GWLP_WNDPROC));
 	SetWindowLongPtrW (hwndCtrl, GWLP_WNDPROC, (LONG_PTR) MouseWheelProc);
+}
+
+////////////////////////////////////////
+// interface
+extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2, char* pszParam3, int nParam3Length)
+{
+	AppDebugWriteViewW(L"%S(%d) - begin", __FUNCTION__, __LINE__);
+
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			AppDebugWriteViewW(L"%S(%d) NODRIVER(%d)", __FUNCTION__, __LINE__, status);
+			//AbortProcess ("NODRIVER");
+			
+			// Finalize
+			FinalizeGlobalLocks ();
+			return 2001;
+		}
+
+    if (hDriver == INVALID_HANDLE_VALUE)
+    {
+      // Finalize
+      FinalizeGlobalLocks ();
+      return 2002;
+		}
+	}
+
+	// mount drive
+	int exitCode = 0;
+	HWND hwndDlg = NULL;	// Setting Null to hwndDlg
+
+	Silent = 1;				// Setting silent mode
+	//void ExtractCommandLine (HWND hwndDlg, wchar_t *lpszCommandLine)
+	//	case CommandDismount:
+
+	// set drive letter to mount
+	wchar_t szUsbDrive[3] = {0};
+	memcpy(szUsbDrive, pszParam1, 2);
+	memcpy(szDriveLetter, pszParam2, 2);
+
+	std::wstring ImagePath(szUsbDrive);
+	ImagePath += L":\\somansa\\disk\\C0000001";
+	memcpy(szFileName, ImagePath.c_str(), ImagePath.length() * sizeof(wchar_t));
+
+	// setting volume passwrod
+	memcpy(CmdVolumePassword.Text, pszParam3, nParam3Length);
+	CmdVolumePassword.Length = nParam3Length;
+
+	if (szFileName[0] != 0 && !TranslateVolumeID (hwndDlg, szFileName, ARRAYSIZE (szFileName)))
+	{
+		AppDebugWriteViewW(L"%S(%d) - szUsbDrive: [%s], szDriveLetter: [%s], szFileName: [%s]", __FUNCTION__, __LINE__, szUsbDrive, szDriveLetter, szFileName);
+		exitCode = 2002;
+	}
+	else if (szFileName[0] != 0 && !IsMountedVolume (szFileName))
+	{
+		BOOL mounted = FALSE;
+		int EffectiveVolumePkcs5 = CmdVolumePkcs5;
+		BOOL bEffectiveTryEmptyPasswordWhenKeyfileUsed = bCmdTryEmptyPasswordWhenKeyfileUsedValid? bCmdTryEmptyPasswordWhenKeyfileUsed : bTryEmptyPasswordWhenKeyfileUsed;
+
+		if (!VolumePathExists (szFileName))
+		{
+			handleWin32Error (hwndDlg, SRC_POS);
+			AppDebugWriteViewW(L"%S(%d) - szFileName: [%s]", __FUNCTION__, __LINE__, szFileName);
+			exitCode = 2003;
+		}
+		else
+		{
+			/* Priority is given to command line parameters
+				* Default values used only when nothing specified in command line
+				*/
+			if (EffectiveVolumePkcs5 == 0)
+				EffectiveVolumePkcs5 = DefaultVolumePkcs5;
+
+			// Command line password or keyfiles
+			if (CmdVolumePassword.Length != 0 || (FirstCmdKeyFile && (CmdVolumePasswordValid || bEffectiveTryEmptyPasswordWhenKeyfileUsed)))
+			{
+				BOOL reportBadPasswd = CmdVolumePassword.Length > 0;
+
+				//if (FirstCmdKeyFile)
+				//	KeyFilesApply (hwndDlg, &CmdVolumePassword, FirstCmdKeyFile, szFileName);
+
+				mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A',
+					szFileName, &CmdVolumePassword, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount,
+					&mountOptions, Silent, reportBadPasswd);
+
+				if (!mounted)
+				{
+					exitCode = MountReturnCode;
+					AppDebugWriteViewW(L"%S(%d) - mount failed.[%d]", __FUNCTION__, __LINE__, MountReturnCode);
+				}
+
+				burn (&CmdVolumePassword, sizeof (CmdVolumePassword));
+			}
+			else
+			{
+				//// Cached password
+				//mounted = MountVolume (hwndDlg, szDriveLetter[0] - L'A', szFileName, NULL, EffectiveVolumePkcs5, CmdVolumePim, bCacheInDriver, bIncludePimInCache, bForceMount, &mountOptions, Silent, FALSE);
+			}
+		}
+	}
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	AppDebugWriteViewW(L"%S(%d) - end(%d)", __FUNCTION__, __LINE__, exitCode);
+
+	return exitCode;
+}
+
+extern "C" _declspec(dllexport) int __cdecl DisconnectSecureDrive(wchar_t* pszParam)
+{
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			AppDebugWriteViewW(L"%S(%d) NODRIVER(%d)", __FUNCTION__, __LINE__, status);
+			
+			// Finalize
+			FinalizeGlobalLocks ();
+			return 2101;
+		}
+
+    if (hDriver == INVALID_HANDLE_VALUE)
+		{
+      // Finalize
+      FinalizeGlobalLocks ();
+      return 2102;
+		}
+	}
+
+	// mount drive
+	cmdUnmountDrive = -1;
+	int exitCode = 0;
+	HWND hwndDlg = NULL;
+
+	Silent = 1;
+	//BOOL bForceUnmount = FALSE;			/* Unmount volume even if it cannot be locked */
+	bForceUnmount = TRUE;
+	//case CommandDismount:
+
+	// set drive letter to mount
+	memcpy(szDriveLetter, pszParam, 2);
+
+	// convert drive letter
+	//if (HAS_ARGUMENT == GetArgumentValue (lpszCommandLineArgs, &i, nNoCommandLineArgs,
+			//szDriveLetter, ARRAYSIZE (szDriveLetter)))
+	{
+		if (	(wcslen(szDriveLetter) == 1)
+			|| (wcslen(szDriveLetter) == 2 && szDriveLetter[1] == L':')
+			)
+		{
+			cmdUnmountDrive = towupper(szDriveLetter[0]) - L'A';
+			if ((cmdUnmountDrive < 0) || (cmdUnmountDrive > (L'Z' - L'A')))
+			{
+				//AbortProcess ("BAD_DRIVE_LETTER");
+				AppDebugWriteViewW(L"%S(%d) - BAD_DRIVE_LETTER", __FUNCTION__, __LINE__);
+				exitCode = 2103;
+			}
+		}
+		else
+		{
+			//AbortProcess ("BAD_DRIVE_LETTER");
+			AppDebugWriteViewW(L"%S(%d) - BAD_DRIVE_LETTER", __FUNCTION__, __LINE__);
+			exitCode = 2104;
+		}
+	}
+	//else
+	//	cmdUnmountDrive = -1;
+
+	// Dismount
+	if ((exitCode == 0) && (cmdUnmountDrive >= 0))
+	{
+		MOUNT_LIST_STRUCT mountList;
+		DWORD bytesReturned;
+
+		BOOL bRet = FALSE;
+		bRet = DeviceIoControl (hDriver, TC_IOCTL_GET_MOUNTED_VOLUMES, NULL, 0, &mountList, sizeof (mountList), &bytesReturned, NULL);
+		if (bRet
+			&& ((mountList.ulMountedDrives < (1 << 26))
+			&& (mountList.ulMountedDrives & (1 << cmdUnmountDrive)) == 0)
+			)
+		{
+			//Error ("NO_VOLUME_MOUNTED_TO_DRIVE", hwndDlg);
+			AppDebugWriteViewW(L"%S(%d) - NO_VOLUME_MOUNTED_TO_DRIVE", __FUNCTION__, __LINE__);
+			exitCode = 2105;
+		}
+		else if (!Dismount (hwndDlg, cmdUnmountDrive))
+		{
+			AppDebugWriteViewW(L"%S(%d) - Ret: [%d], MountedDrives: [%d], cmdUnmountDrive: [%d]", __FUNCTION__, __LINE__, bRet, mountList.ulMountedDrives, cmdUnmountDrive);
+			exitCode = 2016;
+		}
+	}
+	//else if (cmdUnmountDrive == -1)
+	//{
+	//	if (!DismountAll (hwndDlg, bForceUnmount, !Silent, UNMOUNT_MAX_AUTO_RETRIES, UNMOUNT_AUTO_RETRY_DELAY))
+	//		exitCode = 1;
+	//}
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	AppDebugWriteViewW(L"%S(%d) - end(%d)", __FUNCTION__, __LINE__, exitCode);
+
+	return exitCode;
+}
+
+extern "C" _declspec(dllexport) int __cdecl GetMountedSecureDrive (wchar_t* pszParam)
+{
+	AppDebugWriteViewW(L"%S(%d) - begin", __FUNCTION__, __LINE__);
+
+	// Initialize
+	// GetUsedLogicalDrives () - EnterCriticalSection (&csWNetCalls); 에러 처리 위해 초기화 코드 추가
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			AppDebugWriteViewW(L"%S(%d) NODRIVER(%d)", __FUNCTION__, __LINE__, status);
+			
+			// Finalize
+			FinalizeGlobalLocks ();
+			return 2201;
+		}
+
+    if (hDriver == INVALID_HANDLE_VALUE)
+    {
+      // Finalize
+      FinalizeGlobalLocks ();
+      return 2202;
+		}
+	}
+
+	// mount drive
+	int exitCode = -1;
+	//HWND hwndDlg = NULL;
+
+	Silent = 1;
+	//case CommandDismount:
+
+	// set drive letter to mount
+	wchar_t szUsbDrive[3] = {0};
+	memcpy(szUsbDrive, pszParam, 2);
+	std::wstring ImagePath(szUsbDrive);
+
+	ImagePath += L":\\somansa\\disk\\C0000001";
+	memcpy(szFileName, ImagePath.c_str(), ImagePath.length() * sizeof(wchar_t));
+	AppDebugWriteViewW(L"%S(%d)  - szUsbDrive: [%s], szFileName: [%s]", __FUNCTION__, __LINE__, szUsbDrive, szFileName);
+
+	int nMountedDriveNo = GetMountedVolumeDriveNo (szFileName);
+	exitCode = nMountedDriveNo;
+
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	AppDebugWriteViewW(L"%S(%d) - end(%d)", __FUNCTION__, __LINE__, exitCode);
+
+	return exitCode;
 }

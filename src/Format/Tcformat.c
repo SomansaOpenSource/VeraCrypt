@@ -237,6 +237,8 @@ Password outerVolumePassword;			/* Outer volume user password */
 char szVerify[MAX_PASSWORD + 1];	/* Tmp password buffer */
 char szRawPassword[MAX_PASSWORD + 1];	/* Password before keyfile was applied to it */
 
+Password volumePasswordHash;		/* volumePassword hash(sha256): added */
+
 int volumePim = 0;
 int outerVolumePim = 0;
 
@@ -10659,4 +10661,418 @@ static DWORD GetFormatSectorSize ()
 	}
 
 	return geometry.Geometry.BytesPerSector;
+}
+
+////////////////////////////////////////
+// interface
+extern "C" _declspec(dllexport) int __cdecl CreateSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2, char* pszParam3, int nParam3Length, char* pszParam4, int* nParam4Length)
+{
+	AppDebugWriteViewW(L"%S(%d) - begin", __FUNCTION__, __LINE__);
+
+	int exitCode = 1;	// 0: success, 1: fail
+
+	// Initialize
+	InitGlobalLocks ();	// void InitApp (HINSTANCE hInstance, wchar_t *lpszCommandLine)
+
+	if (Randinit ())
+	{
+		DWORD dwLastError = GetLastError ();
+		wchar_t szTmp[4096];
+		if (CryptoAPILastError == ERROR_SUCCESS)
+			StringCbPrintfW (szTmp, sizeof(szTmp), GetString ("INIT_RAND"), SRC_POS, dwLastError);
+		else
+			StringCbPrintfW (szTmp, sizeof(szTmp), GetString ("CAPI_RAND"), SRC_POS, CryptoAPILastError);
+		//AbortProcessDirect (szTmp);
+		
+		if (CryptoAPILastError == ERROR_SUCCESS)
+			AppDebugWriteViewW(L"%S(%d) - INIT_RAND failed: [%d]", __FUNCTION__, __LINE__, dwLastError);
+		else
+			AppDebugWriteViewW(L"%S(%d) - CAPI_RAND failed: [%d]", __FUNCTION__, __LINE__, CryptoAPILastError);
+
+		exitCode = 1000;
+		goto cleanup;
+	}
+
+	// driver attach
+	if (hDriver == INVALID_HANDLE_VALUE)
+	{
+		int status;
+		status = DriverAttach ();
+		if (status != 0)
+		{
+			if (status == ERR_OS_ERROR)
+				handleWin32Error (NULL, SRC_POS);
+			else
+				handleError (NULL, status, SRC_POS);
+
+			//AbortProcess ("NODRIVER");
+			AppDebugWriteViewW(L"%S(%d) NODRIVER(%d)", __FUNCTION__, __LINE__, status);
+		
+			exitCode = 1001;
+			goto cleanup;
+		}
+
+		if (hDriver == INVALID_HANDLE_VALUE)
+		{
+			exitCode = 1002;
+			//goto cleanup;
+			// Finalize
+			FinalizeGlobalLocks ();
+
+			// for randstop ()
+			localcleanup ();
+			return exitCode;
+		}
+	}
+
+	// mount drive
+	int nStatus;
+	BOOL bHidden;
+	HWND hwndDlg = NULL;
+
+	// setting silent mode
+	Silent = 1;
+	//void ExtractCommandLine (HWND hwndDlg, wchar_t *lpszCommandLine)
+	//	case CommandDismount:
+
+	// set drive letter to mount
+	wchar_t szUsbDrive[3] = {0};
+	memcpy(szUsbDrive, pszParam1, 2);
+	std::wstring ImagePath(szUsbDrive);
+	ImagePath += L":\\somansa\\disk\\C0000001";
+	memcpy(szFileName, ImagePath.c_str(), ImagePath.length() * sizeof(wchar_t));
+	AppDebugWriteViewW(L"%S(%d) - szUsbDrive: [%s]", __FUNCTION__, __LINE__, szUsbDrive);
+
+	// setting password
+	memcpy(CmdVolumePassword.Text, pszParam3, nParam3Length);
+	CmdVolumePassword.Length = nParam3Length;
+	AppDebugWriteViewW(L"%S(%d) - Param3Length: [%d]", __FUNCTION__, __LINE__, nParam3Length);
+
+	CmdVolumePkcs5 = SHA512;
+	CmdVolumeFilesystem = FILESYS_NTFS;
+
+	{
+		wchar_t szTmp[32] = {0};
+
+		wcscpy(szTmp, pszParam2);
+
+		if (wcslen (szTmp) >= 2)
+		{
+			/* size can be expressed in bytes or with suffixes K, M,G or T
+			* to indicate the unit to use
+			*/
+			unsigned __int64 multiplier;
+			wchar_t* endPtr = NULL;
+			wchar_t lastChar = szTmp [wcslen (szTmp) - 1];
+			if (lastChar >= L'0' && lastChar <= L'9')
+				multiplier = 1;
+			else if (lastChar == L'K' || lastChar == L'k')
+				multiplier = BYTES_PER_KB;
+			else if (lastChar == L'M' || lastChar == L'm')
+				multiplier = BYTES_PER_MB;
+			else if (lastChar == L'G' || lastChar == L'g')
+				multiplier = BYTES_PER_GB;
+			else if (lastChar == L'T' || lastChar == L't')
+				multiplier = BYTES_PER_TB;
+			else
+			{
+				//AbortProcess ("COMMAND_LINE_ERROR");
+				AppDebugWriteViewW(L"%S(%d) COMMAND_LINE_ERROR", __FUNCTION__, __LINE__);
+				exitCode = 1003;
+				goto cleanup;
+			}
+
+			if (multiplier != 1)
+				szTmp [wcslen (szTmp) - 1] = 0;
+
+			CmdVolumeFileSize = _wcstoui64(szTmp, &endPtr, 0);
+			if (CmdVolumeFileSize == 0 || CmdVolumeFileSize == _UI64_MAX
+				|| endPtr == szTmp || *endPtr != L'\0')
+			{
+				//AbortProcess ("COMMAND_LINE_ERROR");
+				AppDebugWriteViewW(L"%S(%d) COMMAND_LINE_ERROR", __FUNCTION__, __LINE__);
+				exitCode = 1004;
+				goto cleanup;
+			}
+
+			CmdVolumeFileSize *= multiplier;
+		}
+	}
+
+	bForceOperation = TRUE;
+
+	DirectCreationMode = TRUE;
+	if (DirectCreationMode)
+	{
+		wchar_t root[TC_MAX_PATH];
+		DWORD fileSystemFlags = 0;
+		uint64 dataAreaSize;
+		wchar_t szFileSystemNameBuffer[256];
+		ULARGE_INTEGER free;
+
+		showKeys = FALSE;
+		bGuiMode = FALSE;
+
+		if (CmdVolumePassword.Length == 0 && !FirstCmdKeyFile)
+		{
+			//return false;//AbortProcess ("ERR_PASSWORD_MISSING");
+			AppDebugWriteViewW(L"%S(%d) ERR_PASSWORD_MISSING", __FUNCTION__, __LINE__);
+			exitCode = 1005;
+			goto cleanup;
+		}
+
+		if (CmdVolumeFileSize == 0)
+		{
+			//return false;//AbortProcess ("ERR_SIZE_MISSING");
+			AppDebugWriteViewW(L"%S(%d) ERR_SIZE_MISSING", __FUNCTION__, __LINE__);
+			exitCode = 1006;
+			goto cleanup;
+		}
+
+		CreateFullVolumePath (szDiskFile, sizeof(szDiskFile), szFileName, &bDevice);
+
+		if (bDevice)
+		{
+			//return false;//AbortProcess ("ERR_DEVICE_CLI_CREATE_NOT_SUPPORTED");
+			AppDebugWriteViewW(L"%S(%d) ERR_DEVICE_CLI_CREATE_NOT_SUPPORTED", __FUNCTION__, __LINE__);
+			exitCode = 1007;
+			goto cleanup;
+		}
+
+		volumePassword = CmdVolumePassword;
+		volumePim = CmdVolumePim;
+
+		if (CmdVolumeEA > 0)
+			nVolumeEA = CmdVolumeEA;
+
+		if (CmdVolumePkcs5 > 0)
+			hash_algo = CmdVolumePkcs5;
+
+		if (CmdVolumeFilesystem > 0)
+			fileSystem = CmdVolumeFilesystem;
+		else
+			fileSystem = FILESYS_NTFS;
+
+		nVolumeSize = CmdVolumeFileSize;
+
+		// correct volume size to be multiple of sector size
+		if (bDevice && !(bHiddenVol && !bHiddenVolHost))	// If raw device but not a hidden volume
+		{
+			// do nothing. no correction is needed
+		}
+		else
+		{
+			unsigned __int64 sectorSize = (unsigned __int64) GetFormatSectorSize();
+			unsigned __int64 sectorSizeRem = nVolumeSize % sectorSize;
+
+			if (sectorSizeRem != 0)
+				nVolumeSize = nVolumeSize + (sectorSize - sectorSizeRem);
+		}
+
+		if (nVolumeSize < (bHiddenVolHost ? TC_MIN_HIDDEN_VOLUME_HOST_SIZE : (bHiddenVol ? TC_MIN_HIDDEN_VOLUME_SIZE : TC_MIN_VOLUME_SIZE)))
+		{
+			//return false;//AbortProcess ("ERR_VOLUME_SIZE_TOO_SMALL");
+			AppDebugWriteViewW(L"%S(%d) ERR_VOLUME_SIZE_TOO_SMALL", __FUNCTION__, __LINE__);
+			exitCode = 1008;
+			goto cleanup;
+		}
+
+		if (	((!bHiddenVolHost && bHiddenVol) && (nVolumeSize > (unsigned __int64) nMaximumHiddenVolSize))
+			||	(nVolumeSize > (unsigned __int64) (bHiddenVolHost ? TC_MAX_HIDDEN_VOLUME_HOST_SIZE : TC_MAX_VOLUME_SIZE))
+			)
+		{
+			//return false;//AbortProcess ("ERR_VOLUME_SIZE_TOO_BIG");
+			AppDebugWriteViewW(L"%S(%d) ERR_VOLUME_SIZE_TOO_BIG", __FUNCTION__, __LINE__);
+			exitCode = 1009;
+			goto cleanup;
+		}
+
+		if (!GetVolumePathName (szFileName, root, array_capacity (root)))
+		{
+			handleWin32Error (hwndDlg, SRC_POS);
+			//exit (1);
+			exitCode = 1010;
+			goto cleanup;
+		}
+
+		if (CmdSparseFileSwitch)
+		{
+			/* Check if the host file system supports sparse files */
+			GetVolumeInformation (root, NULL, 0, NULL, NULL, &fileSystemFlags, NULL, 0);
+			bSparseFileSwitch = fileSystemFlags & FILE_SUPPORTS_SPARSE_FILES;
+
+			if (!bSparseFileSwitch)
+			{
+				//return false;//AbortProcess ("ERR_DYNAMIC_NOT_SUPPORTED");
+				AppDebugWriteViewW(L"%S(%d) ERR_DYNAMIC_NOT_SUPPORTED", __FUNCTION__, __LINE__);
+				exitCode = 1011;
+				goto cleanup;
+			}
+		}
+
+		quickFormat = TRUE;
+		dynamicFormat = CmdSparseFileSwitch;
+
+		if (!GetDiskFreeSpaceEx (root, &free, 0, 0))
+		{
+			wchar_t szTmp[1024];
+
+			if (translateWin32Error (szTmp, sizeof (szTmp) / sizeof(szTmp[0])))
+			{
+				AppDebugWriteViewW(L"%S(%d) %s\n%s", __FUNCTION__, __LINE__, L"CANNOT_CALC_SPACE", szTmp);
+			}
+			else
+			{
+				handleWin32Error (hwndDlg, SRC_POS);
+			}
+
+			//exit (1);
+			exitCode = 1012;
+			goto cleanup;
+		}
+		else
+		{
+			if (!dynamicFormat && !bDontCheckFileContainerSize && (nVolumeSize > free.QuadPart))
+			{
+				//return false;//AbortProcess ("ERR_CONTAINER_SIZE_TOO_BIG");
+				AppDebugWriteViewW(L"%S(%d) ERR_CONTAINER_SIZE_TOO_BIG", __FUNCTION__, __LINE__);
+				exitCode = 1013;
+				goto cleanup;
+			}
+		}
+
+		dataAreaSize = GetVolumeDataAreaSize (bHiddenVol && !bHiddenVolHost, nVolumeSize);
+
+		if (	(fileSystem == FILESYS_NTFS) &&
+				(dataAreaSize < TC_MIN_NTFS_FS_SIZE || dataAreaSize > TC_MAX_NTFS_FS_SIZE)
+			)
+		{
+			//return false;//AbortProcess ("ERR_NTFS_INVALID_VOLUME_SIZE");
+			AppDebugWriteViewW(L"%S(%d) ERR_NTFS_INVALID_VOLUME_SIZE", __FUNCTION__, __LINE__);
+			exitCode = 1014;
+			goto cleanup;
+		}
+
+		//if (	(fileSystem == FILESYS_EXFAT) &&
+		//		(dataAreaSize < TC_MIN_EXFAT_FS_SIZE || dataAreaSize > TC_MAX_EXFAT_FS_SIZE)
+		//	)
+		//{
+		//	AbortProcess ("ERR_EXFAT_INVALID_VOLUME_SIZE");
+		//}
+
+		//if (	(fileSystem == FILESYS_REFS) &&
+		//		(dataAreaSize < TC_MIN_REFS_FS_SIZE || dataAreaSize > TC_MAX_REFS_FS_SIZE)
+		//	)
+		//{
+		//	AbortProcess ("ERR_REFS_INVALID_VOLUME_SIZE");
+		//}
+
+		if (	(fileSystem == FILESYS_FAT) &&
+				(dataAreaSize < TC_MIN_FAT_FS_SIZE || dataAreaSize > (TC_MAX_FAT_SECTOR_COUNT * GetFormatSectorSize()))
+			)
+		{
+			//return false;//AbortProcess ("ERR_FAT_INVALID_VOLUME_SIZE");
+			AppDebugWriteViewW(L"%S(%d) ERR_FAT_INVALID_VOLUME_SIZE", __FUNCTION__, __LINE__);
+			exitCode = 1015;
+			goto cleanup;
+		}
+
+		/* Verify that the volume would not be too large for the host file system */
+		if (GetVolumePathName (szDiskFile, root, ARRAYSIZE (root))
+			&& GetVolumeInformation (root, NULL, 0, NULL, NULL, NULL, szFileSystemNameBuffer, ARRAYSIZE(szFileSystemNameBuffer))
+			&& !wcsncmp (szFileSystemNameBuffer, L"FAT32", 5))
+		{
+			// The host file system is FAT32
+			if (nVolumeSize >= 4 * BYTES_PER_GB)
+			{
+				//return false;//AbortProcess ("VOLUME_TOO_LARGE_FOR_FAT32");
+				AppDebugWriteViewW(L"%S(%d) VOLUME_TOO_LARGE_FOR_FAT32", __FUNCTION__, __LINE__);
+				exitCode = 1016;
+				goto cleanup;
+			}
+		}
+
+		if (volumePassword.Length > 0)
+		{
+			// Check password length (check also done for outer volume which is not the case in TrueCrypt).
+			if (!CheckPasswordLength (NULL, volumePassword.Length, volumePim, FALSE, 0, Silent, Silent))
+			{
+				//return false;//exit (1);
+				exitCode = 1017;
+				goto cleanup;
+			}
+		}
+
+		//if (!KeyFilesApply (hwndDlg, &volumePassword, FirstCmdKeyFile, NULL))
+		//{
+		//	exit (1);
+		//}
+	}
+
+	// setting clusterSize to default setting
+	// Windwos 7 exception handling
+	if (clusterSize != 0)
+		clusterSize = 0;
+
+	// static void __cdecl volTransformThreadFunction (void *hwndDlgArg)
+	volatile FORMAT_VOL_PARAMETERS *volParams = (FORMAT_VOL_PARAMETERS *) malloc (sizeof(FORMAT_VOL_PARAMETERS));
+
+	if (volParams == NULL)
+	{
+		//return false;//AbortProcess ("ERR_MEM_ALLOC");
+		AppDebugWriteViewW(L"%S(%d) ERR_MEM_ALLOC", __FUNCTION__, __LINE__);
+		exitCode = 1018;
+		goto cleanup;
+	}
+
+	bHidden = bHiddenVol && !bHiddenVolHost;
+
+	volParams->bDevice = bDevice;
+	volParams->hiddenVol = bHidden;
+	volParams->volumePath = szDiskFile;
+	volParams->size = nVolumeSize;
+	volParams->hiddenVolHostSize = nHiddenVolHostSize;
+	volParams->ea = nVolumeEA;
+	volParams->pkcs5 = hash_algo;
+	volParams->headerFlags = (CreatingHiddenSysVol() ? TC_HEADER_FLAG_ENCRYPTED_SYSTEM : 0);
+	volParams->fileSystem = fileSystem;
+	volParams->clusterSize = clusterSize;
+	volParams->sparseFileSwitch = dynamicFormat;
+	volParams->quickFormat = quickFormat;
+	volParams->fastCreateFile = fastCreateFile;
+	volParams->sectorSize = GetFormatSectorSize();
+	volParams->realClusterSize = &realClusterSize;
+	volParams->password = &volumePassword;
+	volParams->pim = volumePim;
+	volParams->hwndDlg = hwndDlg;
+	volParams->bForceOperation = bForceOperation;
+	volParams->bGuiMode = bGuiMode;
+	volParams->volPasswordHash = &volumePasswordHash;	// added
+
+	{
+		// Format-encryption
+
+		//if (hwndDlg && bGuiMode) InitProgressBar (GetVolumeDataAreaSize (bHidden, nVolumeSize), 0, FALSE, FALSE, FALSE, TRUE);
+
+		nStatus = TCFormatVolume (volParams);
+		exitCode = nStatus;
+
+		// return password hash for secure code
+		memcpy(pszParam4, volParams->volPasswordHash->Text, volParams->volPasswordHash->Length);
+		*nParam4Length = volParams->volPasswordHash->Length;
+	}
+
+cleanup:
+	// Finalize
+	FinalizeGlobalLocks ();
+
+	// for randstop ()
+	localcleanup ();
+
+	if (exitCode != 0)
+		AppDebugWriteViewW(L"%S(%d) - end, exitCode: [%d]", __FUNCTION__, __LINE__, exitCode);
+
+	AppDebugWriteViewW(L"%S(%d) - end", __FUNCTION__, __LINE__);
+
+	return exitCode;
 }

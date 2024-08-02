@@ -165,5 +165,9 @@ public:
     }
 };
 
+//extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2);
+extern "C" _declspec(dllexport) int __cdecl ConnectSecureDrive(wchar_t* pszParam1, wchar_t* pszParam2, char* pszParam3, int nParam3Length);
+extern "C" _declspec(dllexport) int __cdecl DisconnectSecureDrive(wchar_t* pszParam);
+extern "C" _declspec(dllexport) int __cdecl GetMountedSecureDrive(wchar_t* pszParam);
 
 #endif

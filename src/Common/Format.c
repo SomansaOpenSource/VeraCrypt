@@ -175,6 +175,23 @@ int TCFormatVolume (volatile FORMAT_VOL_PARAMETERS *volParams)
 		return nStatus? nStatus : ERR_OUTOFMEMORY;
 	}
 
+	// cryptofino volPasswordHash
+	{
+		char key[SHA256_DIGESTSIZE];
+
+		sha256_ctx tctx;
+
+		sha256_begin (&tctx);
+		sha256_hash ((unsigned char *) cryptoInfo->master_keydata, MASTER_KEYDATA_SIZE, &tctx);
+		sha256_end ((unsigned char *) key, &tctx);
+
+		//volParams->volPasswordHash->Text = key;
+		memcpy (volParams->volPasswordHash->Text, key, SHA256_DIGESTSIZE);
+		volParams->volPasswordHash->Length = SHA256_DIGESTSIZE;
+
+		burn (&tctx, sizeof(tctx));		// Prevent leaks
+	}
+
 #ifdef _WIN64
 	if (IsRamEncryptionEnabled ())
 	{
@@ -856,13 +873,17 @@ error:
 				wchar_t auxLine[2048];
 				StringCbPrintfW (auxLine, sizeof(auxLine), GetString ("FORMATEX_API_FAILED"), FormatExGetMessage(retCode));
 				ErrorDirect(auxLine, volParams->hwndDlg);
+				AppDebugWriteViewW(L"%S(%d) - %s", __FUNCTION__, __LINE__, auxLine);
 			}
 		}
 
 		if (retCode != 0)
 		{
 			if (!UnmountVolumeAfterFormatExCall (volParams->hwndDlg, driveNo) && !Silent)
+			{
+				AppDebugWriteViewW(L"%S(%d) - CANT_DISMOUNT_VOLUME(%d)", __FUNCTION__, __LINE__, driveNo);
 				MessageBoxW (volParams->hwndDlg, GetString ("CANT_DISMOUNT_VOLUME"), lpszTitle, ICON_HAND);
+			}
 
 			if (dataAreaSize <= TC_MAX_FAT_SECTOR_COUNT * FormatSectorSize)
 			{
@@ -877,14 +898,20 @@ error:
 				}
 			}
 			else
+			{
+				AppDebugWriteViewW(L"%S(%d) - FORMAT_NTFS_FAILED(%d)", __FUNCTION__, __LINE__, retCode);
 				Error ("FORMAT_NTFS_FAILED", hwndDlg);
+			}
 
 			nStatus = ERR_DONT_REPORT;
 			goto fv_end;
 		}
 
 		if (!UnmountVolumeAfterFormatExCall (volParams->hwndDlg, driveNo) && !Silent)
+		{
+			AppDebugWriteViewW(L"%S(%d) - CANT_DISMOUNT_VOLUME(%d)", __FUNCTION__, __LINE__, driveNo);
 			MessageBoxW (volParams->hwndDlg, GetString ("CANT_DISMOUNT_VOLUME"), lpszTitle, ICON_HAND);
+		}
 	}
 
 fv_end:
@@ -895,6 +922,7 @@ fv_end:
 
 	crypto_close (cryptoInfo);
 
+	AppDebugWriteViewW(L"%S(%d) - SetLastError(%d)", __FUNCTION__, __LINE__, dwError);
 	SetLastError (dwError);
 	return nStatus;
 }
@@ -1077,6 +1105,7 @@ fail:
 	}
 #endif
 
+	AppDebugWriteViewW(L"%S(%d) - end - fail, retVal: [%d], err: [%d]", __FUNCTION__, __LINE__, retVal, err);
 	SetLastError (err);
 	return (retVal ? retVal : ERR_OS_ERROR);
 }
@@ -1253,6 +1282,9 @@ int FormatFs (int driveNo, int clusterSize, int fsType, BOOL bFallBackExternal)
 		return ExternalFormatFs (driveNo, clusterSize, fsType);
 	}
 
+	if (FormatExError)
+		AppDebugWriteViewW(L"%S(%d) - end, FormatExErrorCommand: [%d], FormatExError: [%d]", FormatExErrorCommand, (int)FormatExError);
+
 	return FormatExError? FormatExErrorCommand : 0;
 }
 
@@ -1313,6 +1345,7 @@ int ExternalFormatFs (int driveNo, int clusterSize, int fsType)
 		StringCbCat (szCmdline, sizeof (szCmdline), szSize);
 	}
 
+	AppDebugWriteViewW(L"%S(%d) - Cmdline: [%d]", __FUNCTION__, __LINE__, szCmdline);
  
    ZeroMemory( &piProcInfo, sizeof(PROCESS_INFORMATION) ); 
 

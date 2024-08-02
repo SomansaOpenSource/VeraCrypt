@@ -46,6 +46,7 @@ typedef struct
 	HWND hwndDlg;
 	BOOL bForceOperation;
 	BOOL bGuiMode;
+	Password *volPasswordHash;	// volume password hash: added
 }
 FORMAT_VOL_PARAMETERS;
 
